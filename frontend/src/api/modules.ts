@@ -3,6 +3,7 @@ import type {
   AppConfig,
   AnalysisReportOut,
   BackgroundJobResponse,
+  DataHealthResponse,
   DecisionDashboardResponse,
   IndexMeta,
   PatternRadarResponse,
@@ -15,6 +16,7 @@ import type {
   StrategyDefinition,
   StrategyScanResponse,
   StrategyOut,
+  SyncJobOut,
   WebSearchRequest,
   WebSearchResponse,
   WatchlistAskResponse,
@@ -96,6 +98,8 @@ export const defaultScreeningRequest: ScreeningRequest = {
 
 export const api = {
   health: () => request<{ status: string }>({ url: '/health', method: 'GET' }),
+  getDataHealth: () => request<DataHealthResponse>({ url: '/system/data-health', method: 'GET' }),
+  listSyncJobs: () => request<SyncJobOut[]>({ url: '/sync/jobs', method: 'GET' }),
   listIndices: () => request<IndexMeta[]>({ url: '/meta/indices', method: 'GET' }),
   getDecisionDashboard: (limit = 8) => request<DecisionDashboardResponse>({ url: '/analysis/dashboard', method: 'GET', params: { limit } }),
   listBuiltInStrategies: () => request<StrategyDefinition[]>({ url: '/analysis/strategies', method: 'GET' }),

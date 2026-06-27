@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import AppLayout from '../layout/AppLayout';
+import DataCenter from '../pages/DataCenter';
 import DecisionDashboard from '../pages/DecisionDashboard';
 import PatternRadar from '../pages/PatternRadar';
 import ReportCenter from '../pages/ReportCenter';
@@ -64,6 +65,14 @@ const AppRouter = () => (
         element={
           <ProtectedRoute>
             <ReportCenter />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/data"
+        element={
+          <ProtectedRoute>
+            <DataCenter />
           </ProtectedRoute>
         }
       />

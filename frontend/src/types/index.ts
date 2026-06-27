@@ -18,6 +18,37 @@ export interface BackgroundJobResponse {
   message: string;
 }
 
+export interface SyncJobOut {
+  id: number;
+  job_type: string;
+  status: string;
+  message: string;
+  started_at: string;
+  finished_at?: string | null;
+}
+
+export interface DataTableStatus {
+  key: string;
+  name: string;
+  row_count: number;
+  latest_date?: string | null;
+  coverage_count?: number | null;
+  note: string;
+}
+
+export interface DataHealthResponse {
+  provider: AppConfig['market_data']['provider'];
+  fallback_to_demo: boolean;
+  db_path: string;
+  db_size_mb: number;
+  scheduler_enabled: boolean;
+  daily_sync_cron: string;
+  factor_cache_refresh_minutes: number;
+  latest_trade_date?: string | null;
+  tables: DataTableStatus[];
+  warnings: string[];
+}
+
 export interface RangeFilter {
   min?: number | null;
   max?: number | null;

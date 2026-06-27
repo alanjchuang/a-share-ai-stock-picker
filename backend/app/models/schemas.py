@@ -235,6 +235,28 @@ class AnalysisReportOut(BaseModel):
     created_at: str
 
 
+class DataTableStatus(BaseModel):
+    key: str
+    name: str
+    row_count: int = 0
+    latest_date: str | None = None
+    coverage_count: int | None = None
+    note: str = ""
+
+
+class DataHealthResponse(BaseModel):
+    provider: str
+    fallback_to_demo: bool
+    db_path: str
+    db_size_mb: float
+    scheduler_enabled: bool
+    daily_sync_cron: str
+    factor_cache_refresh_minutes: int
+    latest_trade_date: str | None = None
+    tables: list[DataTableStatus] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ScreeningDiagnostics(BaseModel):
     stock_universe_count: int = 0
     factor_universe_count: int = 0
