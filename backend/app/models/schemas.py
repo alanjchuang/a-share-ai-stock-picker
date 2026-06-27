@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class RangeFilter(BaseModel):
@@ -18,6 +18,38 @@ class IndexConditions(BaseModel):
     max_pe_percentile: float | None = None
     max_pb_percentile: float | None = None
     track_momentum_top_n: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_defaults(cls, value: object) -> object:
+        if value is None:
+            return {}
+        if isinstance(value, str):
+            return {"index_codes": [value] if value else []}
+        if isinstance(value, list):
+            return {"index_codes": value}
+        if isinstance(value, dict):
+            data = value.copy()
+            if data.get("index_codes") is None:
+                single_code = data.get("index_code") or data.get("code")
+                if isinstance(single_code, str) and single_code:
+                    data["index_codes"] = [single_code]
+                elif isinstance(single_code, list):
+                    data["index_codes"] = single_code
+                else:
+                    data["index_codes"] = []
+            if isinstance(data.get("index_codes"), str):
+                data["index_codes"] = [data["index_codes"]]
+            if isinstance(data.get("index_codes"), list):
+                data["index_codes"] = [str(item) for item in data["index_codes"] if item]
+            else:
+                data["index_codes"] = []
+            if data.get("require_member") is None:
+                data["require_member"] = True
+            if data.get("excess_return_days") is None:
+                data["excess_return_days"] = 20
+            return data
+        return value
 
 
 class FundamentalConditions(BaseModel):
@@ -49,6 +81,20 @@ class TechnicalConditions(BaseModel):
     breakout_days: int | None = None
     limit_up_days_min: int | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def fill_defaults(cls, value: object) -> object:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            data = value.copy()
+            if data.get("above_ma") is None:
+                data["above_ma"] = []
+            if data.get("pct_chg_days") is None:
+                data["pct_chg_days"] = 20
+            return data
+        return value
+
 
 class CapitalConditions(BaseModel):
     north_inflow_min: float | None = None
@@ -66,6 +112,21 @@ class SentimentConditions(BaseModel):
     blacklist_keywords: list[str] = Field(default_factory=list)
     max_negative_ratio: float | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def fill_defaults(cls, value: object) -> object:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            data = value.copy()
+            if data.get("days") is None:
+                data["days"] = 7
+            for key in ["include_labels", "whitelist_keywords", "blacklist_keywords"]:
+                if data.get(key) is None:
+                    data[key] = []
+            return data
+        return value
+
 
 class FilterOptions(BaseModel):
     exclude_st: bool | None = None
@@ -80,6 +141,20 @@ class WeightOptions(BaseModel):
     capital: float = 20
     sentiment: float = 15
 
+    @model_validator(mode="before")
+    @classmethod
+    def fill_defaults(cls, value: object) -> object:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            defaults = {"fundamental": 35, "technical": 30, "capital": 20, "sentiment": 15}
+            data = value.copy()
+            for key, default in defaults.items():
+                if data.get(key) is None:
+                    data[key] = default
+            return data
+        return value
+
 
 class ScreeningRequest(BaseModel):
     logic: Literal["and", "or"] = "and"
@@ -91,6 +166,23 @@ class ScreeningRequest(BaseModel):
     filters: FilterOptions = Field(default_factory=FilterOptions)
     weights: WeightOptions = Field(default_factory=WeightOptions)
     limit: int = 200
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_defaults(cls, value: object) -> object:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            data = value.copy()
+            if data.get("logic") is None:
+                data["logic"] = "and"
+            for key in ["index", "fundamental", "technical", "capital", "sentiment", "filters", "weights"]:
+                if data.get(key) is None:
+                    data[key] = {}
+            if data.get("limit") is None:
+                data["limit"] = 200
+            return data
+        return value
 
 
 class StockScore(BaseModel):
