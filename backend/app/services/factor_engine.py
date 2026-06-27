@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from threading import Lock
 from typing import Any
 
@@ -40,15 +41,19 @@ class FactorEngine:
         self.conn = conn
         self.repo = DataRepository(conn)
 
-    def calculate_all(self, force: bool = False) -> list[dict[str, Any]]:
+    def calculate_all(self, force: bool = False, cancel_check: Callable[[], None] | None = None) -> list[dict[str, Any]]:
         latest_trade_date = self.repo.latest_trade_date()
         cached_count = self.conn.execute("SELECT COUNT(*) FROM computed_factors").fetchone()[0]
         stock_count = self.conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
         if not force and cached_count >= stock_count and cached_count > 0:
             return self.repo.read_factor_rows()
+        if cancel_check:
+            cancel_check()
 
         base_rows: list[dict[str, Any]] = []
         for stock in self.repo.list_stocks():
+            if cancel_check:
+                cancel_check()
             payload = self._calculate_single(stock)
             payload["ts_code"] = stock["ts_code"]
             payload["symbol"] = stock["symbol"]
@@ -59,6 +64,8 @@ class FactorEngine:
 
         scored = self._score_rows(base_rows, load_settings().weights)
         for row in scored:
+            if cancel_check:
+                cancel_check()
             ts_code = str(row["ts_code"])
             trade_date = str(row.get("trade_date") or latest_trade_date or "")
             payload = {key: value for key, value in row.items() if key not in {"ts_code", "symbol", "name", "industry", "index_names"}}

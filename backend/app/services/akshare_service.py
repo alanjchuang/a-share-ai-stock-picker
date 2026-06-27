@@ -44,9 +44,11 @@ class AkshareService:
             raise RuntimeError("未安装akshare，请先安装backend/requirements.txt") from exc
         self.ak = ak
 
-    def sync(self, request: SyncRequest) -> dict[str, Any]:
+    def sync(self, request: SyncRequest, cancel_check: Callable[[], None] | None = None) -> dict[str, Any]:
         if not self.settings.akshare.enabled:
             raise RuntimeError("AKShare数据源已在配置中禁用")
+        if cancel_check:
+            cancel_check()
 
         start_date = request.start_date or self.settings.akshare.default_start_date
         end_date = request.end_date or self.settings.akshare.default_end_date or self._last_workday()
@@ -68,18 +70,32 @@ class AkshareService:
         spot_df = self._normalize_spot(spot_df)
         summary["tables"]["stocks"] = self._sync_spot_stocks(spot_df)
         self.conn.commit()
+        if cancel_check:
+            cancel_check()
         summary["tables"]["daily_spot"] = self._sync_spot_daily_and_basic(spot_df, trade_date)
         self.conn.commit()
+        if cancel_check:
+            cancel_check()
 
         if request.sync_indices:
-            summary["tables"]["indices"] = self._sync_indices(start_date, end_date, summary)
-            summary["tables"]["boards"] = self._sync_boards(spot_df, trade_date, summary)
+            summary["tables"]["indices"] = self._sync_indices(start_date, end_date, summary, cancel_check=cancel_check)
+            summary["tables"]["boards"] = self._sync_boards(spot_df, trade_date, summary, cancel_check=cancel_check)
+            if cancel_check:
+                cancel_check()
         if request.sync_fundamentals:
-            summary["tables"]["financial_indicators"] = self._sync_financial_indicators(spot_df, start_date[:4], trade_date, summary)
-        summary["tables"]["capital_flows"] = self._sync_capital_flows(spot_df, summary)
-        summary["tables"]["history"] = self._sync_history(spot_df, start_date, end_date, summary)
+            summary["tables"]["financial_indicators"] = self._sync_financial_indicators(
+                spot_df, start_date[:4], trade_date, summary, cancel_check=cancel_check
+            )
+            if cancel_check:
+                cancel_check()
+        summary["tables"]["capital_flows"] = self._sync_capital_flows(spot_df, summary, cancel_check=cancel_check)
+        if cancel_check:
+            cancel_check()
+        summary["tables"]["history"] = self._sync_history(spot_df, start_date, end_date, summary, cancel_check=cancel_check)
         if request.sync_news:
-            summary["tables"]["news"] = self._sync_news(spot_df, summary)
+            if cancel_check:
+                cancel_check()
+            summary["tables"]["news"] = self._sync_news(spot_df, summary, cancel_check=cancel_check)
 
         self.conn.commit()
         return summary
@@ -128,6 +144,7 @@ class AkshareService:
         end_date: str | None = None,
         min_rows: int | None = None,
         progress: Callable[[int, int, str, int, int], None] | None = None,
+        cancel_check: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """补齐全市场历史K线。
 
@@ -136,6 +153,8 @@ class AkshareService:
         """
         if not self.settings.akshare.enabled:
             raise RuntimeError("AKShare数据源已在配置中禁用")
+        if cancel_check:
+            cancel_check()
 
         safe_start_date = start_date or self.settings.akshare.default_start_date
         safe_end_date = end_date or self.settings.akshare.default_end_date or self._last_workday()
@@ -174,6 +193,8 @@ class AkshareService:
         warnings: list[str] = []
 
         for index, symbol in enumerate(symbols, start=1):
+            if cancel_check:
+                cancel_check()
             normalized = self._symbol(symbol)
             ts_code = self._ts_code(normalized)
             existing = self.conn.execute(
@@ -398,10 +419,19 @@ class AkshareService:
             count += 1
         return count
 
-    def _sync_history(self, df: pd.DataFrame, start_date: str, end_date: str, summary: dict[str, Any]) -> int:
+    def _sync_history(
+        self,
+        df: pd.DataFrame,
+        start_date: str,
+        end_date: str,
+        summary: dict[str, Any],
+        cancel_check: Callable[[], None] | None = None,
+    ) -> int:
         symbols = self._candidate_symbols(df, self.settings.akshare.max_history_symbols)
         count = 0
         for symbol in symbols:
+            if cancel_check:
+                cancel_check()
             hist = self._safe_call(
                 f"{symbol}历史行情",
                 self.ak.stock_zh_a_hist,
@@ -419,10 +449,19 @@ class AkshareService:
             self._sleep()
         return count
 
-    def _sync_financial_indicators(self, df: pd.DataFrame, start_year: str, trade_date: str, summary: dict[str, Any]) -> int:
+    def _sync_financial_indicators(
+        self,
+        df: pd.DataFrame,
+        start_year: str,
+        trade_date: str,
+        summary: dict[str, Any],
+        cancel_check: Callable[[], None] | None = None,
+    ) -> int:
         symbols = self._candidate_symbols(df, self.settings.akshare.max_financial_symbols)
         count = 0
         for symbol in symbols:
+            if cancel_check:
+                cancel_check()
             fin = self._safe_call(
                 f"{symbol}财务指标",
                 self.ak.stock_financial_analysis_indicator,
@@ -470,10 +509,17 @@ class AkshareService:
             self._sleep()
         return count
 
-    def _sync_capital_flows(self, df: pd.DataFrame, summary: dict[str, Any]) -> int:
+    def _sync_capital_flows(
+        self,
+        df: pd.DataFrame,
+        summary: dict[str, Any],
+        cancel_check: Callable[[], None] | None = None,
+    ) -> int:
         symbols = self._candidate_symbols(df, self.settings.akshare.max_history_symbols)
         count = 0
         for symbol in symbols:
+            if cancel_check:
+                cancel_check()
             market = self._exchange(symbol).lower()
             if market == "bj":
                 continue
@@ -516,10 +562,12 @@ class AkshareService:
             self._sleep()
         return count
 
-    def _sync_news(self, df: pd.DataFrame, summary: dict[str, Any]) -> int:
+    def _sync_news(self, df: pd.DataFrame, summary: dict[str, Any], cancel_check: Callable[[], None] | None = None) -> int:
         symbols = self._candidate_symbols(df, self.settings.akshare.max_news_symbols)
         count = 0
         for symbol in symbols:
+            if cancel_check:
+                cancel_check()
             news = self._safe_call(f"{symbol}新闻", self.ak.stock_news_em, symbol=symbol, summary=summary)
             if news is None or news.empty:
                 continue
@@ -548,9 +596,17 @@ class AkshareService:
             self._sleep()
         return count
 
-    def _sync_indices(self, start_date: str, end_date: str, summary: dict[str, Any]) -> int:
+    def _sync_indices(
+        self,
+        start_date: str,
+        end_date: str,
+        summary: dict[str, Any],
+        cancel_check: Callable[[], None] | None = None,
+    ) -> int:
         count = 0
         for index_code, name in INDEX_CODE_MAP.items():
+            if cancel_check:
+                cancel_check()
             symbol = index_code.split(".")[0]
             self.conn.execute("INSERT OR REPLACE INTO index_info(index_code, name, category) VALUES (?, ?, ?)", (index_code, name, "宽基"))
             hist = self._safe_call(
@@ -582,10 +638,18 @@ class AkshareService:
         self.conn.commit()
         return count
 
-    def _sync_boards(self, spot_df: pd.DataFrame, trade_date: str, summary: dict[str, Any]) -> int:
+    def _sync_boards(
+        self,
+        spot_df: pd.DataFrame,
+        trade_date: str,
+        summary: dict[str, Any],
+        cancel_check: Callable[[], None] | None = None,
+    ) -> int:
         count = 0
         spot_lookup = {self._symbol(row["代码"]): row for row in spot_df.to_dict(orient="records")}
         for index_code, (name, category, kind, candidates) in BOARD_INDEX_MAP.items():
+            if cancel_check:
+                cancel_check()
             self.conn.execute("INSERT OR REPLACE INTO index_info(index_code, name, category) VALUES (?, ?, ?)", (index_code, name, category))
             members: list[str] = []
             for board_name in candidates:

@@ -24,6 +24,7 @@ import type {
   WatchlistItem,
   WatchlistItemCreate,
   WatchlistNote,
+  WatchlistNoteType,
   WorkflowInfo
 } from '../types';
 
@@ -100,6 +101,8 @@ export const api = {
   health: () => request<{ status: string }>({ url: '/health', method: 'GET' }),
   getDataHealth: () => request<DataHealthResponse>({ url: '/system/data-health', method: 'GET' }),
   listSyncJobs: () => request<SyncJobOut[]>({ url: '/sync/jobs', method: 'GET' }),
+  getActiveSyncJob: () => request<SyncJobOut | null>({ url: '/sync/jobs/active', method: 'GET' }),
+  cancelSyncJob: (jobId: number) => request<BackgroundJobResponse>({ url: `/sync/jobs/${jobId}/cancel`, method: 'POST' }),
   listIndices: () => request<IndexMeta[]>({ url: '/meta/indices', method: 'GET' }),
   getDecisionDashboard: (limit = 8) => request<DecisionDashboardResponse>({ url: '/analysis/dashboard', method: 'GET', params: { limit } }),
   listBuiltInStrategies: () => request<StrategyDefinition[]>({ url: '/analysis/strategies', method: 'GET' }),
@@ -166,6 +169,6 @@ export const api = {
   askWatchlist: (data: { question: string; group_id?: number | null; item_id?: number | null; include_search?: boolean }) =>
     request<WatchlistAskResponse>({ url: '/watchlists/ask', method: 'POST', data }),
   listWatchlistNotes: (itemId?: number) => request<WatchlistNote[]>({ url: '/watchlists/notes', method: 'GET', params: { item_id: itemId } }),
-  createWatchlistNote: (data: { item_id?: number | null; note_type?: string; content: string }) =>
+  createWatchlistNote: (data: { item_id?: number | null; note_type?: WatchlistNoteType; content: string }) =>
     request<WatchlistNote>({ url: '/watchlists/notes', method: 'POST', data })
 };

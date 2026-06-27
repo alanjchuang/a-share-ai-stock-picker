@@ -454,10 +454,12 @@ export interface WatchlistAskResponse {
   snapshot: Array<Record<string, unknown>>;
 }
 
+export type WatchlistNoteType = 'manual' | 'review' | 'ai_review';
+
 export interface WatchlistNote {
   id: number;
   item_id?: number | null;
-  note_type: string;
+  note_type: WatchlistNoteType;
   content: string;
   ai_payload: Record<string, unknown>;
   created_at: string;

@@ -12,10 +12,9 @@ from app.core.config import load_settings
 from app.core.rate_limit import SimpleRateLimitMiddleware
 from app.db.database import get_connection, init_db
 from app.db.seed import ensure_demo_data
-from app.services.background_jobs import mark_interrupted_jobs
+from app.services.background_jobs import mark_interrupted_jobs, submit_factor_refresh_job
 from app.services.data_quality_service import DataQualityService
 from app.routers import ai, analysis, config, factors, health, meta, reports, screener, stocks, strategies, sync, watchlists
-from app.services.factor_engine import FactorEngine
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 
 
@@ -23,16 +22,18 @@ from app.services.scheduler import shutdown_scheduler, start_scheduler
 async def lifespan(_: FastAPI):
     init_db()
     conn = get_connection()
+    needs_factor_refresh = False
     try:
         mark_interrupted_jobs(conn)
         ensure_demo_data(conn)
         quality_result = DataQualityService(conn).clean_mixed_demo_rows()
         existing = conn.execute("SELECT COUNT(*) FROM computed_factors").fetchone()[0]
         stock_count = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
-        if existing < stock_count or quality_result.get("deleted_daily"):
-            FactorEngine(conn).calculate_all(force=True)
+        needs_factor_refresh = existing < stock_count or bool(quality_result.get("deleted_daily"))
     finally:
         conn.close()
+    if needs_factor_refresh:
+        submit_factor_refresh_job(force=True, job_type="startup_factor_refresh")
     start_scheduler()
     yield
     shutdown_scheduler()

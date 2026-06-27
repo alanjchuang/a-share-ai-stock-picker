@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -27,9 +28,11 @@ class TushareService:
         self.conn = conn
         self.settings = load_settings()
 
-    def sync(self, request: SyncRequest) -> dict[str, Any]:
+    def sync(self, request: SyncRequest, cancel_check: Callable[[], None] | None = None) -> dict[str, Any]:
         if not self.settings.tushare.enabled or not self.settings.tushare.token:
             return {"mode": "demo", "message": "未配置Tushare token，已使用内置演示数据，可在系统配置中补充token后同步真实数据。"}
+        if cancel_check:
+            cancel_check()
 
         try:
             import tushare as ts
@@ -42,25 +45,33 @@ class TushareService:
         end_date = request.end_date or trade_date
 
         summary: dict[str, Any] = {"mode": "tushare", "trade_date": trade_date, "tables": {}}
-        summary["tables"]["stocks"] = self._sync_stock_basic(pro)
+        summary["tables"]["stocks"] = self._sync_stock_basic(pro, cancel_check=cancel_check)
         self.conn.commit()
-        summary["tables"]["daily"] = self._sync_daily(pro, trade_date, start_date, end_date)
+        if cancel_check:
+            cancel_check()
+        summary["tables"]["daily"] = self._sync_daily(pro, trade_date, start_date, end_date, cancel_check=cancel_check)
         self.conn.commit()
         if request.sync_fundamentals:
-            summary["tables"]["fundamentals"] = self._sync_daily_basic(pro, trade_date)
+            if cancel_check:
+                cancel_check()
+            summary["tables"]["fundamentals"] = self._sync_daily_basic(pro, trade_date, cancel_check=cancel_check)
             self.conn.commit()
         if request.sync_indices:
-            summary["tables"]["indices"] = self._sync_indices(pro, start_date, end_date)
+            if cancel_check:
+                cancel_check()
+            summary["tables"]["indices"] = self._sync_indices(pro, start_date, end_date, cancel_check=cancel_check)
             self.conn.commit()
         if request.sync_news:
-            summary["tables"]["news"] = self._sync_news(pro, start_date, end_date)
+            if cancel_check:
+                cancel_check()
+            summary["tables"]["news"] = self._sync_news(pro, start_date, end_date, cancel_check=cancel_check)
         self.conn.commit()
         return summary
 
     def _sleep(self) -> None:
         time.sleep(max(0, self.settings.tushare.request_interval_seconds))
 
-    def _sync_stock_basic(self, pro: Any) -> int:
+    def _sync_stock_basic(self, pro: Any, cancel_check: Callable[[], None] | None = None) -> int:
         df = pro.stock_basic(
             exchange="",
             list_status="L",
@@ -68,6 +79,8 @@ class TushareService:
         )
         count = 0
         for item in df.fillna("").to_dict(orient="records"):
+            if cancel_check:
+                cancel_check()
             name = str(item["name"])
             self.conn.execute(
                 """
@@ -93,7 +106,14 @@ class TushareService:
         self._sleep()
         return count
 
-    def _sync_daily(self, pro: Any, trade_date: str, start_date: str, end_date: str) -> int:
+    def _sync_daily(
+        self,
+        pro: Any,
+        trade_date: str,
+        start_date: str,
+        end_date: str,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> int:
         try:
             df = pro.daily(trade_date=trade_date)
         except Exception:
@@ -102,6 +122,8 @@ class TushareService:
             return 0
         count = 0
         for item in df.fillna(0).to_dict(orient="records"):
+            if cancel_check:
+                cancel_check()
             self.conn.execute(
                 """
                 INSERT OR REPLACE INTO stock_daily
@@ -131,13 +153,15 @@ class TushareService:
         self._sleep()
         return count
 
-    def _sync_daily_basic(self, pro: Any, trade_date: str) -> int:
+    def _sync_daily_basic(self, pro: Any, trade_date: str, cancel_check: Callable[[], None] | None = None) -> int:
         df = pro.daily_basic(
             trade_date=trade_date,
             fields="ts_code,trade_date,turnover_rate,volume_ratio,pe_ttm,pb,total_mv,circ_mv,dv_ttm",
         )
         count = 0
         for item in df.fillna(0).to_dict(orient="records"):
+            if cancel_check:
+                cancel_check()
             ts_code = item["ts_code"]
             self.conn.execute(
                 """
@@ -182,9 +206,11 @@ class TushareService:
         self._sleep()
         return count
 
-    def _sync_indices(self, pro: Any, start_date: str, end_date: str) -> int:
+    def _sync_indices(self, pro: Any, start_date: str, end_date: str, cancel_check: Callable[[], None] | None = None) -> int:
         count = 0
         for index_code, name in INDEX_CODE_MAP.items():
+            if cancel_check:
+                cancel_check()
             self.conn.execute("INSERT OR REPLACE INTO index_info(index_code, name, category) VALUES (?, ?, ?)", (index_code, name, "宽基"))
             try:
                 daily = pro.index_daily(ts_code=index_code, start_date=start_date, end_date=end_date)
@@ -222,7 +248,7 @@ class TushareService:
         self.conn.commit()
         return count
 
-    def _sync_news(self, pro: Any, start_date: str, end_date: str) -> int:
+    def _sync_news(self, pro: Any, start_date: str, end_date: str, cancel_check: Callable[[], None] | None = None) -> int:
         try:
             df = pro.news(src="sina", start_date=start_date, end_date=end_date)
         except Exception:
@@ -232,6 +258,8 @@ class TushareService:
         stocks = self.conn.execute("SELECT ts_code, name FROM stocks").fetchall()
         count = 0
         for item in df.fillna("").to_dict(orient="records"):
+            if cancel_check:
+                cancel_check()
             title = str(item.get("title") or item.get("content") or "")[:120]
             content = str(item.get("content") or title)
             for stock in stocks:

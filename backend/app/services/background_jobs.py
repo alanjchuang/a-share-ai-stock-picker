@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from threading import Lock
+from threading import Event, Lock
 from typing import Any
 
 from app.db.database import get_connection
@@ -23,6 +23,14 @@ _state_lock = Lock()
 _writer_lock = Lock()
 _active_future: Future[None] | None = None
 _active_job: dict[str, Any] | None = None
+_cancel_events: dict[int, Event] = {}
+
+
+class JobCancelled(RuntimeError):
+    """后台任务收到用户取消请求。
+
+    Python线程不能安全强杀，所以所有长任务都通过这个异常做协作式停止。
+    """
 
 
 def _busy_response(job_type: str) -> dict[str, Any]:
@@ -34,6 +42,25 @@ def _busy_response(job_type: str) -> dict[str, Any]:
         "status": "running",
         "message": "已有后台数据任务正在运行，本次请求已跳过；前台会继续使用现有缓存。",
     }
+
+
+def _register_cancel_event(job_id: int) -> Event:
+    event = Event()
+    _cancel_events[job_id] = event
+    return event
+
+
+def _cancel_event(job_id: int) -> Event | None:
+    return _cancel_events.get(job_id)
+
+
+def _cancel_checker(conn: sqlite3.Connection, job_id: int) -> Callable[[], None]:
+    def check() -> None:
+        event = _cancel_event(job_id)
+        if event and event.is_set():
+            raise JobCancelled("任务已按用户请求取消，已保留取消前成功写入的缓存。")
+
+    return check
 
 
 def _insert_job(conn: sqlite3.Connection, job_type: str, status: str, message: str) -> int:
@@ -68,7 +95,7 @@ def mark_interrupted_jobs(conn: sqlite3.Connection) -> int:
         SET status='failed',
             message=message || '（服务已重启，任务已中断，请重新触发。）',
             finished_at=CURRENT_TIMESTAMP
-        WHERE status IN ('queued', 'running') AND finished_at IS NULL
+        WHERE status IN ('queued', 'running', 'cancel_requested') AND finished_at IS NULL
         """
     )
     conn.commit()
@@ -80,6 +107,67 @@ def _clear_active(job_id: int) -> None:
     with _state_lock:
         if _active_job and _active_job.get("job_id") == job_id:
             _active_job = None
+        _cancel_events.pop(job_id, None)
+
+
+def get_active_job() -> dict[str, Any] | None:
+    with _state_lock:
+        return dict(_active_job) if _active_job else None
+
+
+def request_cancel_job(job_id: int) -> dict[str, Any]:
+    with _state_lock:
+        event = _cancel_events.get(job_id)
+        active = dict(_active_job) if _active_job else {}
+        if event and int(active.get("job_id") or 0) == job_id:
+            event.set()
+            job_type = str(active.get("job_type") or "")
+            conn: sqlite3.Connection | None = None
+            try:
+                conn = get_connection()
+                conn.execute("PRAGMA busy_timeout=300")
+                _update_job(conn, job_id, "cancel_requested", "已收到取消请求，后台会在当前数据批次结束后停止。")
+            except sqlite3.OperationalError:
+                # 数据库正被长写事务占用时，也要先让取消按钮即时生效；任务线程会稍后写入cancelled状态。
+                pass
+            finally:
+                if conn:
+                    conn.close()
+            return {
+                "accepted": True,
+                "job_id": job_id,
+                "job_type": job_type,
+                "status": "cancel_requested",
+                "message": "已请求取消后台任务。",
+            }
+
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = get_connection()
+        row = conn.execute("SELECT * FROM sync_jobs WHERE id = ?", (job_id,)).fetchone()
+        if not row:
+            return {"accepted": False, "job_id": job_id, "job_type": "", "status": "not_found", "message": "任务不存在。"}
+        status = str(row["status"])
+        job_type = str(row["job_type"])
+        if status not in {"queued", "running", "cancel_requested"}:
+            return {
+                "accepted": False,
+                "job_id": job_id,
+                "job_type": job_type,
+                "status": status,
+                "message": f"任务当前状态为 {status}，无需取消。",
+            }
+        _update_job(conn, job_id, "cancelled", "任务不在当前进程运行，已标记为取消。", finished=True)
+        return {
+            "accepted": True,
+            "job_id": job_id,
+            "job_type": job_type,
+            "status": "cancelled",
+            "message": "任务不在当前进程运行，已标记为取消。",
+        }
+    finally:
+        if conn:
+            conn.close()
 
 
 def _run_with_acquired_lock(
@@ -93,8 +181,16 @@ def _run_with_acquired_lock(
     try:
         conn = get_connection()
         _update_job(conn, job_id, "running", running_message)
+        _cancel_checker(conn, job_id)()
         result = task(conn, job_id)
-        _update_job(conn, job_id, "success", success_message(result), finished=True)
+        if (_cancel_event(job_id) and _cancel_event(job_id).is_set()):
+            _update_job(conn, job_id, "cancelled", "任务已取消，已保留取消前成功写入的缓存。", finished=True)
+        else:
+            _update_job(conn, job_id, "success", success_message(result), finished=True)
+    except JobCancelled as exc:
+        if conn:
+            conn.rollback()
+            _update_job(conn, job_id, "cancelled", str(exc), finished=True)
     except Exception as exc:
         if conn:
             conn.rollback()
@@ -128,6 +224,7 @@ def submit_exclusive_db_job(
         try:
             conn = get_connection()
             job_id = _insert_job(conn, job_type, "queued", queued_message)
+            _register_cancel_event(job_id)
         except Exception:
             _writer_lock.release()
             raise
@@ -151,6 +248,7 @@ def run_exclusive_db_job_now(
     task: JobTask,
     success_message: SuccessMessage,
 ) -> dict[str, Any]:
+    global _active_job
     if not _writer_lock.acquire(blocking=False):
         return _busy_response(job_type)
     conn: sqlite3.Connection | None = None
@@ -158,10 +256,24 @@ def run_exclusive_db_job_now(
     try:
         conn = get_connection()
         job_id = _insert_job(conn, job_type, "running", running_message)
+        with _state_lock:
+            _active_job = {"job_id": job_id, "job_type": job_type}  # type: ignore[assignment]
+            _register_cancel_event(job_id)
+        _cancel_checker(conn, job_id)()
         result = task(conn, job_id)
         message = success_message(result)
+        if (_cancel_event(job_id) and _cancel_event(job_id).is_set()):
+            message = "任务已取消，已保留取消前成功写入的缓存。"
+            _update_job(conn, job_id, "cancelled", message, finished=True)
+            return {"accepted": True, "job_id": job_id, "job_type": job_type, "status": "cancelled", "message": message}
         _update_job(conn, job_id, "success", message, finished=True)
         return {"accepted": True, "job_id": job_id, "job_type": job_type, "status": "success", "message": message}
+    except JobCancelled as exc:
+        if conn:
+            conn.rollback()
+            if job_id:
+                _update_job(conn, job_id, "cancelled", str(exc), finished=True)
+        return {"accepted": True, "job_id": job_id, "job_type": job_type, "status": "cancelled", "message": str(exc)}
     except Exception as exc:
         if conn:
             conn.rollback()
@@ -172,32 +284,42 @@ def run_exclusive_db_job_now(
         if conn:
             conn.close()
         _writer_lock.release()
+        if job_id:
+            _clear_active(job_id)
 
 
 def _sync_task(payload: SyncRequest) -> JobTask:
-    def task(conn: sqlite3.Connection, _: int) -> dict[str, Any]:
-        sync_result = MarketDataService(conn).sync(payload)
+    def task(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
+        check_cancel = _cancel_checker(conn, job_id)
+        sync_result = MarketDataService(conn).sync(payload, cancel_check=check_cancel)
+        check_cancel()
         quality_result = DataQualityService(conn).clean_mixed_demo_rows()
-        sentiment_count = SentimentService(conn).batch_refresh_existing(limit=300)
-        factor_rows = FactorEngine(conn).calculate_all(force=True)
+        check_cancel()
+        sentiment_count = SentimentService(conn).batch_refresh_existing(limit=300, cancel_check=check_cancel)
+        check_cancel()
+        factor_rows = FactorEngine(conn).calculate_all(force=True, cancel_check=check_cancel)
         return {"sync": sync_result, "quality": quality_result, "sentiment_count": sentiment_count, "factor_count": len(factor_rows)}
 
     return task
 
 
 def _factor_task(force: bool) -> JobTask:
-    def task(conn: sqlite3.Connection, _: int) -> dict[str, Any]:
-        rows = FactorEngine(conn).calculate_all(force=force)
+    def task(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
+        rows = FactorEngine(conn).calculate_all(force=force, cancel_check=_cancel_checker(conn, job_id))
         return {"factor_count": len(rows)}
 
     return task
 
 
 def _stock_history_task(ts_code: str) -> JobTask:
-    def task(conn: sqlite3.Connection, _: int) -> dict[str, Any]:
+    def task(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
+        check_cancel = _cancel_checker(conn, job_id)
+        check_cancel()
         sync_result = AkshareService(conn).sync_stock_history(ts_code)
+        check_cancel()
         quality_result = DataQualityService(conn).clean_mixed_demo_rows()
-        factor_rows = FactorEngine(conn).calculate_all(force=True)
+        check_cancel()
+        factor_rows = FactorEngine(conn).calculate_all(force=True, cancel_check=check_cancel)
         return {"sync": sync_result, "quality": quality_result, "factor_count": len(factor_rows)}
 
     return task
@@ -205,7 +327,10 @@ def _stock_history_task(ts_code: str) -> JobTask:
 
 def _all_stock_history_task() -> JobTask:
     def task(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
+        check_cancel = _cancel_checker(conn, job_id)
+
         def progress(done: int, total: int, ts_code: str, rows: int, skipped: int) -> None:
+            check_cancel()
             percent = round(done / max(total, 1) * 100, 1)
             _update_job(
                 conn,
@@ -214,9 +339,11 @@ def _all_stock_history_task() -> JobTask:
                 f"正在全市场补齐历史K线：{done}/{total}（{percent}%），当前 {ts_code}，已写入 {rows} 条，跳过 {skipped} 只。",
             )
 
-        sync_result = AkshareService(conn).sync_all_stock_history(progress=progress)
+        sync_result = AkshareService(conn).sync_all_stock_history(progress=progress, cancel_check=check_cancel)
+        check_cancel()
         quality_result = DataQualityService(conn).clean_mixed_demo_rows()
-        factor_rows = FactorEngine(conn).calculate_all(force=True)
+        check_cancel()
+        factor_rows = FactorEngine(conn).calculate_all(force=True, cancel_check=check_cancel)
         return {"sync": sync_result, "quality": quality_result, "factor_count": len(factor_rows)}
 
     return task

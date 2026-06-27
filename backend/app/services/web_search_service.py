@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -131,10 +132,95 @@ class WebSearchService:
             response = client.post(self._base_url(), headers=headers, json=payload)
             if response.status_code < 200 or response.status_code >= 300:
                 raise RuntimeError(f"HTTP {response.status_code}: {response.text[:500]}")
-            raw = response.json()
+            raw = self._decode_response(response)
             if not isinstance(raw, dict):
                 raise RuntimeError("搜索响应不是JSON对象")
             return raw
+
+    def _decode_response(self, response: httpx.Response) -> dict[str, Any]:
+        content_type = response.headers.get("content-type", "").lower()
+        text = response.text
+        if "text/event-stream" in content_type or text.lstrip().startswith("data:"):
+            return self._decode_event_stream(text)
+        try:
+            raw = response.json()
+        except ValueError as exc:
+            raise RuntimeError(f"搜索响应不是有效JSON：{self._response_preview(response)}") from exc
+        if not isinstance(raw, dict):
+            raise RuntimeError("搜索响应不是JSON对象")
+        return raw
+
+    @classmethod
+    def _decode_event_stream(cls, text: str) -> dict[str, Any]:
+        base: dict[str, Any] | None = None
+        fallback: dict[str, Any] | None = None
+        rag_parts: list[str] = []
+
+        for payload in cls._event_stream_payloads(text):
+            if payload == "[DONE]":
+                continue
+            try:
+                event = json.loads(payload)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"搜索SSE响应包含无效JSON事件：{payload[:200]}") from exc
+            if not isinstance(event, dict):
+                continue
+
+            fallback = event
+            result = event.get("Result") if isinstance(event.get("Result"), dict) else {}
+            if base is None and (result.get("WebResults") or result.get("ImageResults")):
+                base = event
+
+            rag = result.get("Rag")
+            if isinstance(rag, str) and rag:
+                rag_parts.append(rag)
+
+            choices = result.get("Choices")
+            if isinstance(choices, list):
+                for choice in choices:
+                    if not isinstance(choice, dict):
+                        continue
+                    delta = choice.get("Delta") if isinstance(choice.get("Delta"), dict) else {}
+                    content = delta.get("Content")
+                    if isinstance(content, str) and content:
+                        rag_parts.append(content)
+
+        raw = base or fallback
+        if raw is None:
+            raise RuntimeError("搜索SSE响应为空")
+
+        if rag_parts:
+            result = raw.setdefault("Result", {})
+            if isinstance(result, dict):
+                existing = result.get("Rag")
+                result["Rag"] = (existing if isinstance(existing, str) else "") + "".join(rag_parts)
+        return raw
+
+    @staticmethod
+    def _event_stream_payloads(text: str) -> list[str]:
+        payloads: list[str] = []
+        data_lines: list[str] = []
+        for line in text.splitlines():
+            if not line:
+                if data_lines:
+                    payloads.append("\n".join(data_lines))
+                    data_lines = []
+                continue
+            if line.startswith(":"):
+                continue
+            if line.startswith("data:"):
+                value = line[5:]
+                data_lines.append(value[1:] if value.startswith(" ") else value)
+        if data_lines:
+            payloads.append("\n".join(data_lines))
+        return payloads
+
+    @staticmethod
+    def _response_preview(response: httpx.Response) -> str:
+        text = response.text.strip()
+        if not text:
+            return f"空响应（Content-Type: {response.headers.get('content-type') or 'unknown'}）"
+        return f"Content-Type: {response.headers.get('content-type') or 'unknown'}，响应前缀：{text[:300]}"
 
     def _queries(self, request: WebSearchRequest) -> list[str]:
         queries = [item.strip() for item in request.queries if item and item.strip()]

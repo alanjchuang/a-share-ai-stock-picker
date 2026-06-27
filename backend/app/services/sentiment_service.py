@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -75,7 +76,7 @@ class SentimentService:
             self.conn.commit()
         return result
 
-    def batch_refresh_existing(self, limit: int = 200) -> dict[str, int]:
+    def batch_refresh_existing(self, limit: int = 200, cancel_check: Callable[[], None] | None = None) -> dict[str, int]:
         rows = self.conn.execute(
             """
             SELECT id, ts_code, title, content, source, publish_time
@@ -86,6 +87,8 @@ class SentimentService:
             (limit,),
         ).fetchall()
         for row in rows:
+            if cancel_check:
+                cancel_check()
             result = self.analyze(
                 NewsAnalyzeRequest(
                     ts_code=row["ts_code"],

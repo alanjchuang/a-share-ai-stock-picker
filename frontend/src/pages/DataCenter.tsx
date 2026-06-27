@@ -1,4 +1,4 @@
-import { ClearOutlined, CloudDownloadOutlined, DatabaseOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
+import { ClearOutlined, CloudDownloadOutlined, DatabaseOutlined, ReloadOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons';
 import { Alert, Button, Popconfirm, Progress, Space, Tag, Typography } from 'antd';
 import { PageContainer, ProCard, ProTable, StatisticCard } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
@@ -11,6 +11,8 @@ import { notifySuccess } from '../utils/feedback';
 const statusColor: Record<string, string> = {
   queued: 'blue',
   running: 'gold',
+  cancel_requested: 'orange',
+  cancelled: 'default',
   success: 'green',
   failed: 'red'
 };
@@ -24,7 +26,9 @@ const DataCenter = () => {
   const [health, setHealth] = useState<DataHealthResponse | null>(null);
   const [jobs, setJobs] = useState<SyncJobOut[]>([]);
   const stockCount = useMemo(() => health?.tables.find((item) => item.key === 'stocks')?.row_count ?? 0, [health?.tables]);
-  const hasRunningJob = useMemo(() => jobs.some((item) => ['queued', 'running'].includes(item.status)), [jobs]);
+  const activeJobs = useMemo(() => jobs.filter((item) => ['queued', 'running', 'cancel_requested'].includes(item.status)), [jobs]);
+  const hasRunningJob = activeJobs.length > 0;
+  const primaryActiveJob = activeJobs[0];
 
   async function load(): Promise<void> {
     const [nextHealth, nextJobs] = await Promise.all([api.getDataHealth(), api.listSyncJobs()]);
@@ -46,6 +50,12 @@ const DataCenter = () => {
 
   async function recalc(): Promise<void> {
     const job = await api.calculateFactors();
+    notifySuccess(job.message);
+    await load();
+  }
+
+  async function cancelJob(jobId: number): Promise<void> {
+    const job = await api.cancelSyncJob(jobId);
     notifySuccess(job.message);
     await load();
   }
@@ -89,27 +99,50 @@ const DataCenter = () => {
     { title: '状态', dataIndex: 'status', width: 92, render: (_, record) => <Tag color={statusColor[record.status] ?? 'default'}>{record.status}</Tag> },
     { title: '消息', dataIndex: 'message', ellipsis: true },
     { title: '开始', dataIndex: 'started_at', width: 170 },
-    { title: '结束', dataIndex: 'finished_at', width: 170, render: (_, record) => record.finished_at ?? '-' }
+    { title: '结束', dataIndex: 'finished_at', width: 170, render: (_, record) => record.finished_at ?? '-' },
+    {
+      title: '操作',
+      valueType: 'option',
+      width: 96,
+      render: (_, record) =>
+        ['queued', 'running'].includes(record.status) ? (
+          <Popconfirm
+            title="停止后台任务"
+            description="会在当前数据批次结束后停止，已写入的缓存会保留。"
+            okText="停止"
+            cancelText="返回"
+            onConfirm={() => runSafely(cancelJob(record.id))}
+          >
+            <Button size="small" danger icon={<StopOutlined />}>
+              停止
+            </Button>
+          </Popconfirm>
+        ) : record.status === 'cancel_requested' ? (
+          <Typography.Text type="secondary">停止中</Typography.Text>
+        ) : (
+          '-'
+        )
+    }
   ];
 
   return (
     <PageContainer
       title="数据中心"
       extra={[
-        <Button key="sync" type="primary" icon={<SyncOutlined />} onClick={() => runSafely(sync())}>
+        <Button key="sync" type="primary" icon={<SyncOutlined />} disabled={hasRunningJob} onClick={() => runSafely(sync())}>
           后台同步
         </Button>,
         <Popconfirm
           key="history"
           title="全市场历史K线补齐"
-          description="会遍历全部股票拉取历史K线，耗时较长；任务会在后台串行执行。"
+          description="会遍历全部股票拉取历史K线，耗时较长；任务会在后台串行执行，可在任务记录中停止。"
           okText="开始补齐"
           cancelText="取消"
           onConfirm={() => runSafely(syncAllHistory())}
         >
-          <Button icon={<CloudDownloadOutlined />}>全市场补齐K线</Button>
+          <Button icon={<CloudDownloadOutlined />} disabled={hasRunningJob}>全市场补齐K线</Button>
         </Popconfirm>,
-        <Button key="factor" icon={<ClearOutlined />} onClick={() => runSafely(recalc())}>
+        <Button key="factor" icon={<ClearOutlined />} disabled={hasRunningJob} onClick={() => runSafely(recalc())}>
           重算因子
         </Button>,
         <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(load())}>
@@ -123,6 +156,29 @@ const DataCenter = () => {
         ) : (
           <Alert showIcon type="success" message="数据缓存状态正常，页面会优先读取本地缓存。" />
         )}
+        {primaryActiveJob ? (
+          <Alert
+            showIcon
+            type={primaryActiveJob.status === 'cancel_requested' ? 'warning' : 'info'}
+            message={primaryActiveJob.status === 'cancel_requested' ? '后台任务停止中' : '后台任务运行中'}
+            description={`#${primaryActiveJob.id} ${primaryActiveJob.job_type}：${primaryActiveJob.message}`}
+            action={
+              ['queued', 'running'].includes(primaryActiveJob.status) ? (
+                <Popconfirm
+                  title="停止当前后台任务"
+                  description="任务会在当前股票/数据批次结束后停止，已写入缓存不会被清空。"
+                  okText="停止"
+                  cancelText="返回"
+                  onConfirm={() => runSafely(cancelJob(primaryActiveJob.id))}
+                >
+                  <Button danger size="small" icon={<StopOutlined />}>
+                    停止任务
+                  </Button>
+                </Popconfirm>
+              ) : undefined
+            }
+          />
+        ) : null}
         <StatisticCard.Group>
           <StatisticCard statistic={{ title: '数据源', value: health?.provider ?? '-' }} />
           <StatisticCard statistic={{ title: '最新交易日', value: health?.latest_trade_date ?? '-' }} />

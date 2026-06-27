@@ -68,7 +68,7 @@ const IntelligenceCenter = () => {
   async function saveBriefing(): Promise<void> {
     if (!summaryText) return;
     await api.createWatchlistNote({
-      note_type: 'market_intelligence',
+      note_type: 'review',
       content: `# ${query}\n\n${summaryText}`
     });
     notifySuccess('情报摘要已保存到自选股复盘笔记');
