@@ -41,6 +41,7 @@ import type {
   ScreeningResult,
   StockDetail,
   StockScore,
+  StockSelectionWorkflowJob,
   StockSelectionWorkflowResult,
   WorkflowInfo,
   WorkbenchMode
@@ -59,6 +60,7 @@ const ratingColor: Record<string, string> = {
 type BeginnerPreset = 'balanced' | 'value' | 'growth' | 'sentiment';
 type RecommendRisk = 'conservative' | 'balanced' | 'aggressive';
 const RUNNING_RECOMMENDATION_STALE_MS = 30 * 60 * 1000;
+const RUNNING_WORKFLOW_STALE_MS = 30 * 60 * 1000;
 
 function diagnosticsDescription(result: ScreeningResult): string {
   const diagnostics = result.diagnostics;
@@ -108,10 +110,24 @@ function recommendationJobLabel(job: OneClickRecommendJob): string {
   return [time, statusText].filter(Boolean).join(' · ') + message;
 }
 
+function workflowJobLabel(job: StockSelectionWorkflowJob): string {
+  const time = formatLocalDateTime(job.finished_at || job.started_at);
+  const resultCount = job.result?.screening_result?.total;
+  const statusText = job.status === 'success' ? `${resultCount ?? 0}只` : job.status;
+  const message = job.status === 'failed' && job.message ? ` · ${job.message.slice(0, 34)}${job.message.length > 34 ? '...' : ''}` : '';
+  return [time, statusText].filter(Boolean).join(' · ') + message;
+}
+
 function isFreshRunningRecommendationJob(job: OneClickRecommendJob): boolean {
   if (!['queued', 'running'].includes(job.status)) return false;
   const timestamp = parseBackendDateTime(job.started_at)?.getTime();
   return typeof timestamp === 'number' && Number.isFinite(timestamp) && Date.now() - timestamp < RUNNING_RECOMMENDATION_STALE_MS;
+}
+
+function isFreshRunningWorkflowJob(job: StockSelectionWorkflowJob): boolean {
+  if (!['queued', 'running'].includes(job.status)) return false;
+  const timestamp = parseBackendDateTime(job.started_at)?.getTime();
+  return typeof timestamp === 'number' && Number.isFinite(timestamp) && Date.now() - timestamp < RUNNING_WORKFLOW_STALE_MS;
 }
 
 function normalizeRequest(values: Partial<ScreeningRequest>): ScreeningRequest {
@@ -161,10 +177,13 @@ const Workbench = () => {
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [aiParseError, setAiParseError] = useState<string | null>(null);
   const [workflowResult, setWorkflowResult] = useState<StockSelectionWorkflowResult | null>(null);
+  const [workflowJob, setWorkflowJob] = useState<StockSelectionWorkflowJob | null>(null);
+  const [workflowJobs, setWorkflowJobs] = useState<StockSelectionWorkflowJob[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [selectedWorkflowPath, setSelectedWorkflowPath] = useState<string | undefined>();
   const [saveOpen, setSaveOpen] = useState(false);
   const recommendationRunning = Boolean(recommendationJob && ['queued', 'running'].includes(recommendationJob.status));
+  const workflowRunning = Boolean(workflowJob && ['queued', 'running'].includes(workflowJob.status));
 
   useEffect(() => {
     form.setFieldsValue(defaultScreeningRequest);
@@ -175,6 +194,7 @@ const Workbench = () => {
       setSelectedWorkflowPath(defaultWorkflow?.path);
     }));
     runSafely(loadRecommendationJobs(true));
+    runSafely(loadWorkflowJobs(true));
   }, []);
 
   useEffect(() => {
@@ -189,6 +209,14 @@ const Workbench = () => {
     }, 3000);
     return () => window.clearInterval(timer);
   }, [recommendationJob?.id, recommendationJob?.status]);
+
+  useEffect(() => {
+    if (!workflowRunning || !workflowJob?.id) return undefined;
+    const timer = window.setInterval(() => {
+      runSafely(refreshWorkflowJob(workflowJob.id));
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [workflowJob?.id, workflowJob?.status]);
 
   const indexOptions = useMemo(
     () =>
@@ -206,6 +234,15 @@ const Workbench = () => {
         value: job.id
       })),
     [recommendationJobs]
+  );
+
+  const workflowJobOptions = useMemo(
+    () =>
+      workflowJobs.map((job) => ({
+        label: `#${job.id} ${workflowJobLabel(job)}`,
+        value: job.id
+      })),
+    [workflowJobs]
   );
 
   function beginnerRequest(preset: BeginnerPreset): ScreeningRequest {
@@ -322,24 +359,55 @@ const Workbench = () => {
     setAiParseError(null);
     setRecommendationError(null);
     setWorkflowResult(null);
+    setWorkflowJob(null);
     try {
-      const workflow = await api.runSelectionWorkflow(aiText, selectedWorkflowPath);
-      setWorkflowResult(workflow);
-      form.setFieldsValue(workflow.parsed_request);
-      setCurrentRequest(workflow.parsed_request);
-      if (workflow.screening_result) {
-        setResult(workflow.screening_result);
-        setLatestResult(workflow.screening_result);
-        setSelected(workflow.screening_result.rows[0] ?? null);
-      } else {
-        await run(workflow.parsed_request);
+      const job = await api.submitSelectionWorkflow(aiText, selectedWorkflowPath);
+      if (!job.accepted || !job.job_id) {
+        if (job.job_id && ['queued', 'running'].includes(job.status)) {
+          setWorkflowJob({
+            id: job.job_id,
+            job_type: job.job_type,
+            status: job.status,
+            message: job.message,
+            started_at: '',
+            result: null
+          });
+          notifySuccess(job.message);
+          return;
+        }
+        setAiParseError(job.message || 'AI解析选股任务未启动。');
+        return;
       }
-      const view = workflow.llm_analysis.market_view;
-      notifySuccess(typeof view === 'string' ? view : `Workflow执行完成：${workflow.workflow_name}`);
+      setWorkflowJob({
+        id: job.job_id,
+        job_type: job.job_type,
+        status: job.status,
+        message: job.message,
+        started_at: '',
+        result: null
+      });
+      notifySuccess(job.message);
+      await refreshWorkflowJob(job.job_id, false);
+      await loadWorkflowJobs();
     } catch (error) {
       setWorkflowResult(null);
       setAiParseError(getRequestErrorMessage(error, 'AI解析选股失败，请先检查 LLM 与 Workflow 配置。'));
       throw error;
+    }
+  }
+
+  function applyWorkflowResult(workflow: StockSelectionWorkflowResult, showSuccess = true): void {
+    setWorkflowResult(workflow);
+    form.setFieldsValue(workflow.parsed_request);
+    setCurrentRequest(workflow.parsed_request);
+    if (workflow.screening_result) {
+      setResult(workflow.screening_result);
+      setLatestResult(workflow.screening_result);
+      setSelected(workflow.screening_result.rows[0] ?? null);
+    }
+    const view = workflow.llm_analysis.market_view;
+    if (showSuccess) {
+      notifySuccess(typeof view === 'string' ? view : `Workflow执行完成：${workflow.workflow_name}`);
     }
   }
 
@@ -396,6 +464,41 @@ const Workbench = () => {
       risk_level: record.sentiment_score < 45 ? 'high' : 'medium'
     });
     notifySuccess(`${record.name} 已加入自选股`);
+  }
+
+  async function loadWorkflowJobs(restoreLatest = false): Promise<void> {
+    const jobs = await api.listSelectionWorkflowJobs(20);
+    setWorkflowJobs(jobs);
+    if (!restoreLatest) return;
+    const runningJob = jobs.find(isFreshRunningWorkflowJob);
+    const latestSuccess = jobs.find((job) => job.status === 'success' && job.result);
+    const job = runningJob ?? latestSuccess;
+    if (!job) {
+      setWorkflowJob(null);
+      return;
+    }
+    setWorkflowJob(job);
+    if (job.result) {
+      applyWorkflowResult(job.result, false);
+      setAiParseError(null);
+    }
+  }
+
+  async function openWorkflowJob(jobId: number): Promise<void> {
+    setAiParseError(null);
+    await refreshWorkflowJob(jobId, false);
+  }
+
+  async function refreshWorkflowJob(jobId: number, showSuccess = true): Promise<void> {
+    const job = await api.getSelectionWorkflowJob(jobId);
+    setWorkflowJob(job);
+    setWorkflowJobs((items) => [job, ...items.filter((item) => item.id !== job.id)].slice(0, 20));
+    if (job.status === 'success' && job.result) {
+      applyWorkflowResult(job.result, showSuccess);
+      setAiParseError(null);
+    } else if (job.status === 'failed' || job.status === 'blocked') {
+      setAiParseError(job.message || 'AI解析选股后台任务失败。');
+    }
   }
 
   async function loadRecommendationJobs(restoreLatest = false): Promise<void> {
@@ -622,10 +725,26 @@ const Workbench = () => {
             <div className="toolbar-row">
               <Space wrap>
                 <Tooltip title="解析自然语言并执行选股">
-                  <Button type="primary" icon={<RobotOutlined />} onClick={() => runSafely(parseAiText())}>
-                    AI解析选股
+                  <Button type="primary" icon={<RobotOutlined />} loading={workflowRunning} disabled={workflowRunning} onClick={() => runSafely(parseAiText())}>
+                    {workflowRunning ? '解析中' : 'AI解析选股'}
                   </Button>
                 </Tooltip>
+                <Space.Compact>
+                  <Tooltip title="刷新最近的AI解析记录">
+                    <Button icon={<HistoryOutlined />} onClick={() => runSafely(loadWorkflowJobs())}>
+                      解析记录
+                    </Button>
+                  </Tooltip>
+                  <Select<number>
+                    value={workflowJob?.id}
+                    onChange={(jobId) => runSafely(openWorkflowJob(jobId))}
+                    options={workflowJobOptions}
+                    placeholder="选择解析记录"
+                    disabled={!workflowJobOptions.length}
+                    style={{ width: 230 }}
+                    popupMatchSelectWidth={320}
+                  />
+                </Space.Compact>
                 <Tooltip title="根据近期行情、新闻舆情和多因子评分生成研究候选">
                   <Button icon={<ThunderboltOutlined />} loading={recommendationRunning} disabled={recommendationRunning} onClick={() => runSafely(oneClickRecommend())}>
                     {recommendationRunning ? '荐股中' : '一键荐股'}
@@ -672,6 +791,14 @@ const Workbench = () => {
             type={result.diagnostics.warnings.length ? 'warning' : 'info'}
             message={`筛选诊断：返回 ${result.diagnostics.returned_count} / 命中 ${result.diagnostics.matched_count}`}
             description={diagnosticsDescription(result)}
+          />
+        ) : null}
+        {workflowRunning && workflowJob ? (
+          <Alert
+            showIcon
+            type="info"
+            message="AI解析选股后台运行中"
+            description={`#${workflowJob.id} ${workflowJob.message}；页面不会被锁住，可以继续筛选、查看股票或调整配置。`}
           />
         ) : null}
         {aiParseError ? (

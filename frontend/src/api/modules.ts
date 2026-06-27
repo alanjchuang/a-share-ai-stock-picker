@@ -16,6 +16,7 @@ import type {
   OneClickRecommendJob,
   OneClickRecommendResponse,
   StockSelectionWorkflowResult,
+  StockSelectionWorkflowJob,
   StockDetail,
   StockLlmAnalysisResponse,
   StockMarketResponse,
@@ -151,8 +152,20 @@ export const api = {
     request<StockSelectionWorkflowResult>({
       url: '/ai/stock-selection-workflow',
       method: 'POST',
-      data: { text, workflow_path: workflowPath }
+      data: { text, workflow_path: workflowPath },
+      skipGlobalLoading: true
     }),
+  submitSelectionWorkflow: (text: string, workflowPath?: string) =>
+    request<BackgroundJobResponse>({
+      url: '/ai/stock-selection-workflow/jobs',
+      method: 'POST',
+      data: { text, workflow_path: workflowPath },
+      skipGlobalLoading: true
+    }),
+  listSelectionWorkflowJobs: (limit = 20) =>
+    request<StockSelectionWorkflowJob[]>({ url: '/ai/stock-selection-workflow/jobs', method: 'GET', params: { limit }, skipGlobalLoading: true }),
+  getSelectionWorkflowJob: (jobId: number) =>
+    request<StockSelectionWorkflowJob>({ url: `/ai/stock-selection-workflow/jobs/${jobId}`, method: 'GET', skipGlobalLoading: true }),
   listWorkflows: (options?: ApiRequestOptions) =>
     request<WorkflowInfo[]>({ url: '/ai/workflows', method: 'GET', skipGlobalLoading: true, ...cacheOptions(META_CACHE_TTL_MS, options) }),
   searchWeb: (data: WebSearchRequest) => request<WebSearchResponse>({ url: '/ai/search', method: 'POST', data }),
@@ -169,7 +182,7 @@ export const api = {
     sort_order?: 'asc' | 'desc';
   }, options?: ApiRequestOptions) => request<StockMarketResponse>({ url: '/stocks', method: 'GET', params, ...cacheOptions(MARKET_CACHE_TTL_MS, options) }),
   getStockDetail: (tsCode: string, options?: ApiRequestOptions) =>
-    request<StockDetail>({ url: `/stocks/${encodeURIComponent(tsCode)}`, method: 'GET', ...cacheOptions(PAGE_CACHE_TTL_MS, options) }),
+    request<StockDetail>({ url: `/stocks/${encodeURIComponent(tsCode)}`, method: 'GET', skipGlobalLoading: true, ...cacheOptions(PAGE_CACHE_TTL_MS, options) }),
   analyzeStock: (tsCode: string) =>
     request<StockLlmAnalysisResponse>({ url: `/stocks/${encodeURIComponent(tsCode)}/llm-analysis`, method: 'POST', skipGlobalLoading: true }),
   refreshStockDetail: async (tsCode: string) => {

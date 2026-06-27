@@ -482,6 +482,16 @@ export interface StockSelectionWorkflowResult {
   steps: WorkflowStepTrace[];
 }
 
+export interface StockSelectionWorkflowJob {
+  id: number;
+  job_type: string;
+  status: 'queued' | 'running' | 'success' | 'failed' | 'blocked' | string;
+  message: string;
+  started_at: string;
+  finished_at?: string | null;
+  result?: StockSelectionWorkflowResult | null;
+}
+
 export interface WatchlistGroup {
   id: number;
   name: string;

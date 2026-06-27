@@ -19,6 +19,11 @@ from app.services.market_prompt_service import MarketPromptService
 from app.services.nl_parser import NaturalLanguageParser
 from app.services.recommendation_jobs import get_one_click_recommendation_job, list_one_click_recommendation_jobs, submit_one_click_recommendation_job
 from app.services.sentiment_service import SentimentService
+from app.services.stock_selection_jobs import (
+    get_stock_selection_workflow_job,
+    list_stock_selection_workflow_jobs,
+    submit_stock_selection_workflow_job,
+)
 from app.services.stock_selection_workflow import StockSelectionWorkflow
 from app.services.web_search_service import WebSearchService
 
@@ -38,6 +43,26 @@ def list_workflows(conn=Depends(get_db)) -> ApiResponse[list[dict[str, object]]]
 @router.post("/stock-selection-workflow", response_model=ApiResponse[StockSelectionWorkflowResult])
 def run_stock_selection_workflow(payload: WorkflowRunRequest, conn=Depends(get_db)) -> ApiResponse[StockSelectionWorkflowResult]:
     return ok(StockSelectionWorkflow(conn).run(payload))
+
+
+@router.post("/stock-selection-workflow/jobs", response_model=ApiResponse[dict[str, object]])
+def submit_stock_selection_workflow(payload: WorkflowRunRequest) -> ApiResponse[dict[str, object]]:
+    job = submit_stock_selection_workflow_job(payload)
+    message = "AI解析选股已在后台启动" if job["accepted"] else job["message"]
+    return ok(job, message)
+
+
+@router.get("/stock-selection-workflow/jobs", response_model=ApiResponse[list[dict[str, object]]])
+def stock_selection_workflow_jobs(limit: int = 20) -> ApiResponse[list[dict[str, object]]]:
+    return ok(list_stock_selection_workflow_jobs(limit=limit))
+
+
+@router.get("/stock-selection-workflow/jobs/{job_id}", response_model=ApiResponse[dict[str, object]])
+def stock_selection_workflow_job(job_id: int) -> ApiResponse[dict[str, object]]:
+    job = get_stock_selection_workflow_job(job_id)
+    if job is None:
+        raise ValueError("AI解析选股任务不存在")
+    return ok(job)
 
 
 @router.post("/recommendations/one-click", response_model=ApiResponse[dict[str, object]])
