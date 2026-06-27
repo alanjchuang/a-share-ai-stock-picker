@@ -193,3 +193,40 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_started ON sync_jobs(status, started_at);
+
+CREATE TABLE IF NOT EXISTS etfs (
+    etf_code TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    name TEXT NOT NULL,
+    category TEXT DEFAULT '',
+    fund_type TEXT DEFAULT '',
+    exchange TEXT DEFAULT '',
+    latest_price REAL,
+    iopv REAL,
+    discount_rate REAL,
+    latest_share REAL,
+    flow_mv REAL,
+    total_mv REAL,
+    data_date TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS etf_daily (
+    etf_code TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    open REAL,
+    high REAL,
+    low REAL,
+    close REAL,
+    pre_close REAL,
+    change REAL,
+    pct_chg REAL,
+    vol REAL,
+    amount REAL,
+    amplitude REAL,
+    turnover_rate REAL,
+    PRIMARY KEY (etf_code, trade_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_etf_daily_date ON etf_daily(trade_date);
+CREATE INDEX IF NOT EXISTS idx_etfs_category ON etfs(category);

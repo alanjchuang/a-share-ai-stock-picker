@@ -471,43 +471,56 @@ class AkshareService:
             )
             if fin is None or fin.empty:
                 continue
-            latest = fin.sort_values("日期").iloc[-1].to_dict()
+            sorted_fin = fin.sort_values("日期")
+            latest = sorted_fin.iloc[-1].to_dict()
             ts_code = self._ts_code(symbol)
-            existing = self.conn.execute(
-                "SELECT * FROM fundamentals WHERE ts_code = ? AND trade_date = ?",
-                (ts_code, trade_date),
-            ).fetchone()
-            old = dict(existing) if existing else {}
-            self.conn.execute(
-                """
-                INSERT OR REPLACE INTO fundamentals
-                (ts_code, trade_date, pe_ttm, pb, peg, roe, gross_margin, netprofit_margin, revenue_yoy,
-                 deduct_profit_yoy, debt_to_assets, ocf, dividend_yield, total_mv, circ_mv, goodwill_ratio)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    ts_code,
-                    trade_date,
-                    old.get("pe_ttm", 0),
-                    old.get("pb", 0),
-                    old.get("peg", 0),
-                    self._pick_num(latest, ["净资产收益率(%)", "加权净资产收益率(%)"], old.get("roe", 0)),
-                    self._pick_num(latest, ["销售毛利率(%)"], old.get("gross_margin", 0)),
-                    self._pick_num(latest, ["销售净利率(%)"], old.get("netprofit_margin", 0)),
-                    self._pick_num(latest, ["主营业务收入增长率(%)", "营业总收入同比增长率(%)"], old.get("revenue_yoy", 0)),
-                    self._pick_num(latest, ["净利润增长率(%)", "扣非净利润同比增长率(%)"], old.get("deduct_profit_yoy", 0)),
-                    self._pick_num(latest, ["资产负债率(%)"], old.get("debt_to_assets", 0)),
-                    self._pick_num(latest, ["经营现金净流量与净利润的比率(%)", "每股经营性现金流(元)"], old.get("ocf", 0)),
-                    self._pick_num(latest, ["股息发放率(%)"], old.get("dividend_yield", 0)),
-                    old.get("total_mv", 0),
-                    old.get("circ_mv", 0),
-                    old.get("goodwill_ratio", 0),
-                ),
-            )
-            count += 1
+            report_dates: set[str] = set()
+            for item in sorted_fin.to_dict(orient="records"):
+                report_date = self._date8(item.get("日期"))
+                if not report_date:
+                    continue
+                self._upsert_financial_indicator_row(ts_code, report_date, item)
+                report_dates.add(report_date)
+                count += 1
+            if trade_date and trade_date not in report_dates:
+                self._upsert_financial_indicator_row(ts_code, trade_date, latest)
+                count += 1
             self.conn.commit()
             self._sleep()
         return count
+
+    def _upsert_financial_indicator_row(self, ts_code: str, trade_date: str, item: dict[str, Any]) -> None:
+        existing = self.conn.execute(
+            "SELECT * FROM fundamentals WHERE ts_code = ? AND trade_date = ?",
+            (ts_code, trade_date),
+        ).fetchone()
+        old = dict(existing) if existing else {}
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO fundamentals
+            (ts_code, trade_date, pe_ttm, pb, peg, roe, gross_margin, netprofit_margin, revenue_yoy,
+             deduct_profit_yoy, debt_to_assets, ocf, dividend_yield, total_mv, circ_mv, goodwill_ratio)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ts_code,
+                trade_date,
+                old.get("pe_ttm", 0),
+                old.get("pb", 0),
+                old.get("peg", 0),
+                self._pick_num(item, ["净资产收益率(%)", "加权净资产收益率(%)"], old.get("roe", 0)),
+                self._pick_num(item, ["销售毛利率(%)"], old.get("gross_margin", 0)),
+                self._pick_num(item, ["销售净利率(%)"], old.get("netprofit_margin", 0)),
+                self._pick_num(item, ["主营业务收入增长率(%)", "营业总收入同比增长率(%)"], old.get("revenue_yoy", 0)),
+                self._pick_num(item, ["净利润增长率(%)", "扣非净利润同比增长率(%)"], old.get("deduct_profit_yoy", 0)),
+                self._pick_num(item, ["资产负债率(%)"], old.get("debt_to_assets", 0)),
+                self._pick_num(item, ["经营现金净流量与净利润的比率(%)", "每股经营性现金流(元)"], old.get("ocf", 0)),
+                self._pick_num(item, ["股息发放率(%)"], old.get("dividend_yield", 0)),
+                old.get("total_mv", 0),
+                old.get("circ_mv", 0),
+                old.get("goodwill_ratio", 0),
+            ),
+        )
 
     def _sync_capital_flows(
         self,

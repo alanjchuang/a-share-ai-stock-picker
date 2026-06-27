@@ -5,6 +5,7 @@ import AppLayout from '../layout/AppLayout';
 
 const DataCenter = lazy(() => import('../pages/DataCenter'));
 const DecisionDashboard = lazy(() => import('../pages/DecisionDashboard'));
+const EtfCenter = lazy(() => import('../pages/EtfCenter'));
 const IntelligenceCenter = lazy(() => import('../pages/IntelligenceCenter'));
 const PatternRadar = lazy(() => import('../pages/PatternRadar'));
 const ReportCenter = lazy(() => import('../pages/ReportCenter'));
@@ -43,6 +44,7 @@ const AppRouter = () => (
       <Route path="/strategy-lab" element={protectedPage(<StrategyLab />)} />
       <Route path="/patterns" element={protectedPage(<PatternRadar />)} />
       <Route path="/markets" element={protectedPage(<StockMarket />)} />
+      <Route path="/etfs" element={protectedPage(<EtfCenter />)} />
       <Route path="/reports" element={protectedPage(<ReportCenter />)} />
       <Route path="/data" element={protectedPage(<DataCenter />)} />
       <Route path="/intelligence" element={protectedPage(<IntelligenceCenter />)} />

@@ -253,6 +253,58 @@ class KlinePatternHit(BaseModel):
     stock: StockScore | None = None
 
 
+class EtfDailyPoint(BaseModel):
+    trade_date: str
+    open: float
+    close: float
+    low: float
+    high: float
+    volume: float
+    amount: float
+    ma5: float | None = None
+    ma20: float | None = None
+    ma60: float | None = None
+
+
+class EtfMarketItem(BaseModel):
+    etf_code: str
+    symbol: str
+    name: str
+    category: str
+    fund_type: str = ""
+    exchange: str = ""
+    trade_date: str | None = None
+    close: float | None = None
+    pct_chg: float | None = None
+    amount: float | None = None
+    turnover_rate: float | None = None
+    iopv: float | None = None
+    discount_rate: float | None = None
+    flow_mv: float | None = None
+    total_mv: float | None = None
+    pct_chg_20: float | None = None
+    pct_chg_60: float | None = None
+    pct_chg_120: float | None = None
+    volatility_60: float | None = None
+    max_drawdown_120: float | None = None
+
+
+class EtfMarketResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    rows: list[EtfMarketItem]
+    latest_trade_date: str | None = None
+    categories: list[str] = Field(default_factory=list)
+
+
+class EtfDetail(BaseModel):
+    base: EtfMarketItem
+    kline: list[EtfDailyPoint]
+    data_source: str = "本地SQLite缓存 / akshare"
+    data_warnings: list[str] = Field(default_factory=list)
+
+
 class StrategyDefinition(BaseModel):
     key: str
     name: str
@@ -552,9 +604,27 @@ class StockNewsItem(BaseModel):
     keywords: list[str]
 
 
+class FinancialSnapshot(BaseModel):
+    report_date: str
+    pe_ttm: float | None = None
+    pb: float | None = None
+    roe: float | None = None
+    gross_margin: float | None = None
+    netprofit_margin: float | None = None
+    revenue_yoy: float | None = None
+    deduct_profit_yoy: float | None = None
+    debt_to_assets: float | None = None
+    ocf: float | None = None
+    dividend_yield: float | None = None
+    total_mv: float | None = None
+    circ_mv: float | None = None
+    goodwill_ratio: float | None = None
+
+
 class StockDetail(BaseModel):
     base: StockScore
     kline: list[KLinePoint]
+    financial_history: list[FinancialSnapshot] = Field(default_factory=list)
     news: list[StockNewsItem]
     radar: dict[str, float]
     rating: str

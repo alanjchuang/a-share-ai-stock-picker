@@ -1,14 +1,23 @@
 import { ArrowLeftOutlined, DatabaseOutlined, ReloadOutlined, StarOutlined } from '@ant-design/icons';
-import { Alert, Button, Descriptions, Empty, List, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Empty, List, Space, Table, Tag, Typography } from 'antd';
 import { PageContainer, ProCard, StatisticCard } from '@ant-design/pro-components';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
+import type { ColumnsType } from 'antd/es/table';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/modules';
-import type { StockDetail as StockDetailType } from '../types';
+import type { FinancialSnapshot, StockDetail as StockDetailType } from '../types';
 import { runSafely } from '../utils/async';
 import { notifySuccess } from '../utils/feedback';
+
+function formatNumber(value?: number | null, digits = 2): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '-';
+}
+
+function pctText(value?: number | null): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : '-';
+}
 
 function klineOption(detail: StockDetailType): EChartsOption {
   const dates = detail.kline.map((item) => item.trade_date);
@@ -53,6 +62,41 @@ function radarOption(detail: StockDetailType): EChartsOption {
   };
 }
 
+function financialOption(history: FinancialSnapshot[]): EChartsOption {
+  const rows = history.slice().sort((a, b) => a.report_date.localeCompare(b.report_date));
+  const dates = rows.map((item) => item.report_date);
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { top: 0, type: 'scroll', data: ['市盈率(TTM)', 'ROE', '净利率', '营收同比', '扣非净利同比'] },
+    grid: { left: 52, right: 52, top: 42, bottom: 38 },
+    xAxis: { type: 'category', data: dates },
+    yAxis: [
+      { type: 'value', name: '百分比', axisLabel: { formatter: '{value}%' } },
+      { type: 'value', name: '倍数', alignTicks: true }
+    ],
+    series: [
+      { name: '市盈率(TTM)', type: 'line', yAxisIndex: 1, smooth: true, data: rows.map((item) => item.pe_ttm ?? null) },
+      { name: 'ROE', type: 'line', smooth: true, data: rows.map((item) => item.roe ?? null) },
+      { name: '净利率', type: 'line', smooth: true, data: rows.map((item) => item.netprofit_margin ?? null) },
+      { name: '营收同比', type: 'line', smooth: true, data: rows.map((item) => item.revenue_yoy ?? null) },
+      { name: '扣非净利同比', type: 'line', smooth: true, data: rows.map((item) => item.deduct_profit_yoy ?? null) }
+    ]
+  };
+}
+
+const financialColumns: ColumnsType<FinancialSnapshot> = [
+  { title: '报告日', dataIndex: 'report_date', width: 104, fixed: 'left' },
+  { title: '市盈率', dataIndex: 'pe_ttm', width: 92, render: (value) => formatNumber(value as number | null) },
+  { title: 'PB', dataIndex: 'pb', width: 76, render: (value) => formatNumber(value as number | null) },
+  { title: 'ROE', dataIndex: 'roe', width: 86, render: (value) => pctText(value as number | null) },
+  { title: '毛利率', dataIndex: 'gross_margin', width: 92, render: (value) => pctText(value as number | null) },
+  { title: '净利率', dataIndex: 'netprofit_margin', width: 92, render: (value) => pctText(value as number | null) },
+  { title: '营收同比', dataIndex: 'revenue_yoy', width: 98, render: (value) => pctText(value as number | null) },
+  { title: '扣非净利同比', dataIndex: 'deduct_profit_yoy', width: 122, render: (value) => pctText(value as number | null) },
+  { title: '资产负债率', dataIndex: 'debt_to_assets', width: 110, render: (value) => pctText(value as number | null) },
+  { title: '股息率', dataIndex: 'dividend_yield', width: 92, render: (value) => pctText(value as number | null) }
+];
+
 const StockDetail = () => {
   const { tsCode } = useParams<{ tsCode: string }>();
   const navigate = useNavigate();
@@ -68,12 +112,18 @@ const StockDetail = () => {
     if (!detail) return [];
     return [
       { title: 'AI评分', value: detail.base.ai_score.toFixed(1), suffix: detail.base.rating },
-      { title: 'PE(TTM)', value: detail.base.pe_ttm?.toFixed(2) ?? '-' },
+      { title: '市盈率(TTM)', value: formatNumber(detail.base.pe_ttm) },
       { title: 'PB', value: detail.base.pb?.toFixed(2) ?? '-' },
-      { title: 'ROE', value: `${detail.base.roe?.toFixed(2) ?? '-'}%` },
+      { title: 'ROE', value: pctText(detail.base.roe) },
+      { title: '营收同比', value: pctText(detail.base.revenue_yoy) },
       { title: '舆情分', value: detail.base.sentiment_score.toFixed(0), suffix: detail.base.sentiment_label }
     ];
   }, [detail]);
+
+  const financialRows = useMemo(
+    () => [...(detail?.financial_history ?? [])].sort((a, b) => b.report_date.localeCompare(a.report_date)),
+    [detail]
+  );
 
   const needsHistorySync = useMemo(() => {
     if (!detail) return false;
@@ -134,15 +184,37 @@ const StockDetail = () => {
             <Descriptions column={{ xs: 1, sm: 2, md: 4 }} size="small">
               <Descriptions.Item label="行业">{detail.base.industry}</Descriptions.Item>
               <Descriptions.Item label="所属指数">{detail.base.index_names.join(' / ')}</Descriptions.Item>
-              <Descriptions.Item label="最新收盘">{detail.base.close}</Descriptions.Item>
-              <Descriptions.Item label="涨跌幅">{detail.base.pct_chg}%</Descriptions.Item>
-              <Descriptions.Item label="营收同比">{detail.base.revenue_yoy}%</Descriptions.Item>
-              <Descriptions.Item label="流通市值">{detail.base.circ_mv}亿</Descriptions.Item>
-              <Descriptions.Item label="主力净流入">{detail.base.main_net_inflow}</Descriptions.Item>
+              <Descriptions.Item label="最新收盘">{formatNumber(detail.base.close)}</Descriptions.Item>
+              <Descriptions.Item label="涨跌幅">{pctText(detail.base.pct_chg)}</Descriptions.Item>
+              <Descriptions.Item label="市盈率(TTM)">{formatNumber(detail.base.pe_ttm)}</Descriptions.Item>
+              <Descriptions.Item label="PB">{formatNumber(detail.base.pb)}</Descriptions.Item>
+              <Descriptions.Item label="ROE">{pctText(detail.base.roe)}</Descriptions.Item>
+              <Descriptions.Item label="营收同比">{pctText(detail.base.revenue_yoy)}</Descriptions.Item>
+              <Descriptions.Item label="流通市值">{formatNumber(detail.base.circ_mv, 0)}亿</Descriptions.Item>
+              <Descriptions.Item label="主力净流入">{formatNumber(detail.base.main_net_inflow)}</Descriptions.Item>
               <Descriptions.Item label="评级">
                 <Tag color={detail.base.rating === 'A' ? 'green' : detail.base.rating === 'B' ? 'blue' : 'gold'}>{detail.base.rating}</Tag>
               </Descriptions.Item>
             </Descriptions>
+          </ProCard>
+          <ProCard split="vertical" bordered>
+            <ProCard title="财务趋势" colSpan="55%">
+              {financialRows.length ? (
+                <ReactECharts option={financialOption(detail.financial_history)} style={{ height: 320 }} notMerge />
+              ) : (
+                <Empty description="暂无财务历史" />
+              )}
+            </ProCard>
+            <ProCard title="财务明细">
+              <Table<FinancialSnapshot>
+                rowKey="report_date"
+                size="small"
+                columns={financialColumns}
+                dataSource={financialRows}
+                pagination={false}
+                scroll={{ x: 960, y: 270 }}
+              />
+            </ProCard>
           </ProCard>
           <ProCard split="vertical" bordered>
             <ProCard title="120日K线" colSpan="70%">

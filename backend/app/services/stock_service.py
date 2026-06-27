@@ -4,7 +4,7 @@ import re
 import sqlite3
 from typing import Any
 
-from app.models.schemas import KLinePoint, StockDetail, StockMarketItem, StockMarketResponse, StockNewsItem
+from app.models.schemas import FinancialSnapshot, KLinePoint, StockDetail, StockMarketItem, StockMarketResponse, StockNewsItem
 from app.core.config import load_settings
 from app.services.data_repository import DataRepository
 from app.services.factor_engine import FactorEngine
@@ -91,6 +91,26 @@ class StockService:
             for item in tech.to_dict(orient="records")
         ]
 
+        financial_history = [
+            FinancialSnapshot(
+                report_date=str(item.get("trade_date") or ""),
+                pe_ttm=self._optional_float(item.get("pe_ttm")),
+                pb=self._optional_float(item.get("pb")),
+                roe=self._optional_float(item.get("roe")),
+                gross_margin=self._optional_float(item.get("gross_margin")),
+                netprofit_margin=self._optional_float(item.get("netprofit_margin")),
+                revenue_yoy=self._optional_float(item.get("revenue_yoy")),
+                deduct_profit_yoy=self._optional_float(item.get("deduct_profit_yoy")),
+                debt_to_assets=self._optional_float(item.get("debt_to_assets")),
+                ocf=self._optional_float(item.get("ocf")),
+                dividend_yield=self._optional_float(item.get("dividend_yield")),
+                total_mv=self._optional_float(item.get("total_mv")),
+                circ_mv=self._optional_float(item.get("circ_mv")),
+                goodwill_ratio=self._optional_float(item.get("goodwill_ratio")),
+            )
+            for item in self.repo.financial_history(ts_code, limit=16)
+        ]
+
         news_rows = self.repo.recent_news(ts_code, 30)
         news = [
             StockNewsItem(
@@ -119,7 +139,18 @@ class StockService:
             data_warnings.append("当前个股缺少可用K线，请在数据中心触发真实行情同步。")
         elif len(kline) < 30:
             data_warnings.append(f"当前仅有 {len(kline)} 条可信K线，部分均线和回测信号会偏弱；请在数据中心同步更多历史行情。")
-        return StockDetail(base=base, kline=kline, news=news, radar=radar, rating=base.rating, data_source=source, data_warnings=data_warnings)
+        if not financial_history:
+            data_warnings.append("当前个股缺少可用财务历史，请在数据中心触发财务数据同步。")
+        return StockDetail(
+            base=base,
+            kline=kline,
+            financial_history=financial_history,
+            news=news,
+            radar=radar,
+            rating=base.rating,
+            data_source=source,
+            data_warnings=data_warnings,
+        )
 
     @staticmethod
     def _market_row_matches(

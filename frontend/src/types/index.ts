@@ -183,6 +183,58 @@ export interface StockMarketResponse {
   factor_universe_count: number;
 }
 
+export interface EtfDailyPoint {
+  trade_date: string;
+  open: number;
+  close: number;
+  low: number;
+  high: number;
+  volume: number;
+  amount: number;
+  ma5?: number | null;
+  ma20?: number | null;
+  ma60?: number | null;
+}
+
+export interface EtfMarketItem {
+  etf_code: string;
+  symbol: string;
+  name: string;
+  category: string;
+  fund_type: string;
+  exchange: string;
+  trade_date?: string | null;
+  close?: number | null;
+  pct_chg?: number | null;
+  amount?: number | null;
+  turnover_rate?: number | null;
+  iopv?: number | null;
+  discount_rate?: number | null;
+  flow_mv?: number | null;
+  total_mv?: number | null;
+  pct_chg_20?: number | null;
+  pct_chg_60?: number | null;
+  pct_chg_120?: number | null;
+  volatility_60?: number | null;
+  max_drawdown_120?: number | null;
+}
+
+export interface EtfMarketResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  rows: EtfMarketItem[];
+  latest_trade_date?: string | null;
+  categories: string[];
+}
+
+export interface EtfDetail {
+  base: EtfMarketItem;
+  kline: EtfDailyPoint[];
+  data_source: string;
+  data_warnings: string[];
+}
+
 export interface IndustryHeatItem {
   industry: string;
   count: number;
@@ -335,9 +387,27 @@ export interface StockNewsItem {
   keywords: string[];
 }
 
+export interface FinancialSnapshot {
+  report_date: string;
+  pe_ttm?: number | null;
+  pb?: number | null;
+  roe?: number | null;
+  gross_margin?: number | null;
+  netprofit_margin?: number | null;
+  revenue_yoy?: number | null;
+  deduct_profit_yoy?: number | null;
+  debt_to_assets?: number | null;
+  ocf?: number | null;
+  dividend_yield?: number | null;
+  total_mv?: number | null;
+  circ_mv?: number | null;
+  goodwill_ratio?: number | null;
+}
+
 export interface StockDetail {
   base: StockScore;
   kline: KLinePoint[];
+  financial_history: FinancialSnapshot[];
   news: StockNewsItem[];
   radar: Record<string, number>;
   rating: string;

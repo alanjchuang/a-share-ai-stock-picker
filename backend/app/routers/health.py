@@ -50,6 +50,16 @@ def _table_status(
                 )
                 or 0
             )
+        if table == "etf_daily":
+            coverage_count = int(
+                _scalar(
+                    conn,
+                    "SELECT COUNT(DISTINCT etf_code) FROM etf_daily WHERE trade_date = ?",
+                    (latest_date,),
+                    0,
+                )
+                or 0
+            )
     return DataTableStatus(key=key, name=name, row_count=row_count, latest_date=latest_date, coverage_count=coverage_count, note=note)
 
 
@@ -95,6 +105,8 @@ def data_health(conn=Depends(get_db)) -> ApiResponse[DataHealthResponse]:
         _table_status(conn, "capital_flows", "资金流", "capital_flows", "trade_date", "主力、北向、融资和龙虎榜因子"),
         _table_status(conn, "computed_factors", "因子缓存", "computed_factors", "trade_date", "页面优先读取该缓存，减少即时重算"),
         _table_status(conn, "stock_news", "新闻舆情", "stock_news", "publish_time", "公告、资讯和舆情评分"),
+        _table_status(conn, "etfs", "ETF基础信息", "etfs", "data_date", "ETF中心搜索、分类和规模展示"),
+        _table_status(conn, "etf_daily", "ETF日线行情", "etf_daily", "trade_date", "ETF K线、涨跌幅、波动率和回撤"),
         _table_status(conn, "index_members", "指数成分", "index_members", note="指数池筛选和赛道过滤"),
         _table_status(conn, "analysis_reports", "复盘报告", "analysis_reports", "created_at", "本地历史复盘"),
     ]

@@ -5,6 +5,8 @@ import type {
   BackgroundJobResponse,
   DataHealthResponse,
   DecisionDashboardResponse,
+  EtfDetail,
+  EtfMarketResponse,
   IndexMeta,
   MarketPromptRequest,
   MarketPromptResponse,
@@ -145,6 +147,17 @@ export const api = {
   getStockDetail: (tsCode: string) => request<StockDetail>({ url: `/stocks/${encodeURIComponent(tsCode)}`, method: 'GET' }),
   syncStockHistory: (tsCode: string) =>
     request<BackgroundJobResponse>({ url: `/stocks/${encodeURIComponent(tsCode)}/history/sync`, method: 'POST' }),
+  listEtfs: (params: {
+    q?: string;
+    category?: string;
+    page?: number;
+    page_size?: number;
+    sort_by?: string;
+    sort_order?: 'asc' | 'desc';
+  }) => request<EtfMarketResponse>({ url: '/etfs', method: 'GET', params }),
+  getEtfDetail: (etfCode: string) => request<EtfDetail>({ url: `/etfs/${encodeURIComponent(etfCode)}`, method: 'GET' }),
+  syncEtfs: (historyLimit = 0) =>
+    request<BackgroundJobResponse>({ url: '/etfs/sync', method: 'POST', params: { history_limit: historyLimit } }),
   listStrategies: () => request<StrategyOut[]>({ url: '/strategies', method: 'GET' }),
   createStrategy: (data: { name: string; remark: string; conditions: ScreeningRequest; schedule_enabled: boolean; schedule_cron: string }) =>
     request<StrategyOut>({ url: '/strategies', method: 'POST', data }),

@@ -192,6 +192,37 @@ def ensure_demo_data(conn: sqlite3.Connection) -> None:
             ),
         )
 
+        latest_year = int(latest_date[:4])
+        for year_offset, year in enumerate(range(latest_year - 5, latest_year), start=1):
+            report_date = f"{year}1231"
+            growth_wave = math.sin(stock_idx * 0.7 + year_offset)
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO fundamentals
+                (ts_code, trade_date, pe_ttm, pb, peg, roe, gross_margin, netprofit_margin, revenue_yoy,
+                 deduct_profit_yoy, debt_to_assets, ocf, dividend_yield, total_mv, circ_mv, goodwill_ratio)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts_code,
+                    report_date,
+                    round(10 + valuation_bias * 4.2 + year_offset * 0.7 + max(growth_wave, 0), 2),
+                    round(1.0 + valuation_bias * 0.38 + year_offset * 0.04, 2),
+                    round(0.55 + valuation_bias * 0.18 + year_offset * 0.03, 2),
+                    round(7 + (stock_idx % 8) * 2.6 + year_offset * 0.7 + growth_wave, 2),
+                    round(20 + (stock_idx % 6) * 6 + year_offset * 0.5, 2),
+                    round(7 + (stock_idx % 5) * 3.2 + year_offset * 0.4 + growth_wave, 2),
+                    round(-5 + (stock_idx % 9) * 4.5 + year_offset * 1.1 + growth_wave * 2, 2),
+                    round(-9 + (stock_idx % 8) * 5.4 + year_offset * 1.3 + growth_wave * 2, 2),
+                    round(30 + (stock_idx % 6) * 6.2 - year_offset * 0.5, 2),
+                    round(16_000 + stock_idx * 2_100 + year_offset * 1_150, 2),
+                    round(0.4 + (stock_idx % 5) * 0.45 + year_offset * 0.04, 2),
+                    round(520 + stock_idx * 210 + year_offset * 45 + (7200 if ts_code == "600519.SH" else 0), 2),
+                    round(320 + stock_idx * 135 + year_offset * 28 + (6500 if ts_code == "600519.SH" else 0), 2),
+                    round(max(0, (stock_idx % 4) * 1.5 + year_offset * 0.08), 2),
+                ),
+            )
+
         news_rows = [POSITIVE_NEWS[stock_idx % 2], NEUTRAL_NEWS]
         if stock_idx % 5 == 0:
             news_rows.append(NEGATIVE_NEWS)

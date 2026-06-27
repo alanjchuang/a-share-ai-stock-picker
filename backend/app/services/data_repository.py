@@ -108,6 +108,50 @@ class DataRepository:
         ).fetchone()
         return dict(row) if row else {}
 
+    def financial_history(self, ts_code: str, limit: int = 12) -> list[dict[str, Any]]:
+        metric_where = """
+            COALESCE(roe, 0) != 0
+            OR COALESCE(gross_margin, 0) != 0
+            OR COALESCE(netprofit_margin, 0) != 0
+            OR COALESCE(revenue_yoy, 0) != 0
+            OR COALESCE(deduct_profit_yoy, 0) != 0
+            OR COALESCE(debt_to_assets, 0) != 0
+            OR COALESCE(ocf, 0) != 0
+            OR COALESCE(dividend_yield, 0) != 0
+            OR COALESCE(goodwill_ratio, 0) != 0
+        """
+        report_rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM fundamentals
+            WHERE ts_code = ? AND ({metric_where})
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """,
+            (ts_code, max(1, limit)),
+        ).fetchall()
+
+        rows_by_date = {str(row["trade_date"]): dict(row) for row in report_rows}
+        latest = self.latest_fundamental(ts_code)
+        if latest:
+            rows_by_date[str(latest.get("trade_date") or "")] = latest
+
+        if not rows_by_date:
+            fallback_rows = self.conn.execute(
+                """
+                SELECT *
+                FROM fundamentals
+                WHERE ts_code = ?
+                ORDER BY trade_date DESC
+                LIMIT ?
+                """,
+                (ts_code, max(1, limit)),
+            ).fetchall()
+            rows_by_date = {str(row["trade_date"]): dict(row) for row in fallback_rows}
+
+        rows = sorted(rows_by_date.values(), key=lambda item: str(item.get("trade_date") or ""))
+        return rows[-max(1, limit) :]
+
     def latest_capital(self, ts_code: str) -> dict[str, Any]:
         row = self.conn.execute(
             "SELECT * FROM capital_flows WHERE ts_code = ? ORDER BY trade_date DESC LIMIT 1",

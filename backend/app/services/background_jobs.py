@@ -9,6 +9,7 @@ from typing import Any
 from app.db.database import get_connection
 from app.models.schemas import SyncRequest
 from app.services.akshare_service import AkshareService
+from app.services.etf_service import EtfService
 from app.services.factor_engine import FactorEngine
 from app.services.data_quality_service import DataQualityService
 from app.services.market_data_service import MarketDataService
@@ -349,6 +350,24 @@ def _all_stock_history_task() -> JobTask:
     return task
 
 
+def _etf_sync_task(history_limit: int) -> JobTask:
+    def task(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
+        cancel_check = _cancel_checker(conn, job_id)
+
+        def progress(done: int, total: int, etf_code: str, rows: int) -> None:
+            percent = round(done / max(total, 1) * 100, 1)
+            _update_job(
+                conn,
+                job_id,
+                "running",
+                f"正在同步ETF历史行情：{done}/{total}（{percent}%），当前 {etf_code}，已写入 {rows} 条K线。",
+            )
+
+        return EtfService(conn).sync(history_limit=history_limit, progress=progress, cancel_check=cancel_check)
+
+    return task
+
+
 def submit_sync_refresh_job(payload: SyncRequest) -> dict[str, Any]:
     return submit_exclusive_db_job(
         "manual_sync",
@@ -395,6 +414,21 @@ def submit_all_stock_history_job() -> dict[str, Any]:
             f"失败 {result.get('sync', {}).get('failed_symbols', 0)} 只，"
             f"写入/覆盖 {result.get('sync', {}).get('rows', 0)} 条K线，"
             f"因子缓存覆盖 {result.get('factor_count', 0)} 只股票。"
+        ),
+    )
+
+
+def submit_etf_sync_job(history_limit: int = 0) -> dict[str, Any]:
+    return submit_exclusive_db_job(
+        "etf_sync",
+        "ETF行情与历史K线同步已进入后台队列。",
+        "正在后台同步ETF行情、净值类型和历史K线。",
+        _etf_sync_task(history_limit),
+        lambda result: (
+            "ETF同步完成："
+            f"实时行情 {result.get('spot_count', 0)} 只，"
+            f"历史覆盖 {result.get('history_symbols', 0)} 只，"
+            f"写入/覆盖 {result.get('rows', 0)} 条K线。"
         ),
     )
 

@@ -15,8 +15,8 @@ from app.models.schemas import (
     WebSearchResponse,
     WorkflowRunRequest,
 )
-from app.services.nl_parser import NaturalLanguageParser
 from app.services.market_prompt_service import MarketPromptService
+from app.services.nl_parser import NaturalLanguageParser
 from app.services.recommendation_jobs import get_one_click_recommendation_job, submit_one_click_recommendation_job
 from app.services.sentiment_service import SentimentService
 from app.services.stock_selection_workflow import StockSelectionWorkflow
@@ -60,7 +60,7 @@ def web_search(payload: WebSearchRequest) -> ApiResponse[WebSearchResponse]:
     return ok(WebSearchService().search(payload))
 
 
-.post("/market-prompts", response_model=ApiResponse[MarketPromptResponse])
+@router.post("/market-prompts", response_model=ApiResponse[MarketPromptResponse])
 def market_prompts(payload: MarketPromptRequest) -> ApiResponse[MarketPromptResponse]:
     return ok(MarketPromptService().generate(payload), "市场情报Prompt已生成")
 
