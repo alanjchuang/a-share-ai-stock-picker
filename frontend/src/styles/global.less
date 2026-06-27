@@ -148,6 +148,16 @@ body {
   min-height: 300px;
 }
 
+.compact-chart {
+  min-height: 260px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .score-badge {
   min-width: 54px;
   font-weight: 700;
@@ -186,6 +196,10 @@ body {
   }
 
   .chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid {
     grid-template-columns: 1fr;
   }
 

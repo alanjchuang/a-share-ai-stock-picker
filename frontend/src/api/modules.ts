@@ -2,13 +2,17 @@ import { request } from './http';
 import type {
   AppConfig,
   BackgroundJobResponse,
+  DecisionDashboardResponse,
   IndexMeta,
+  PatternRadarResponse,
   ScreeningRequest,
   ScreeningResult,
   OneClickRecommendResponse,
   StockSelectionWorkflowResult,
   StockDetail,
   StockMarketResponse,
+  StrategyDefinition,
+  StrategyScanResponse,
   StrategyOut,
   WebSearchRequest,
   WebSearchResponse,
@@ -92,6 +96,12 @@ export const defaultScreeningRequest: ScreeningRequest = {
 export const api = {
   health: () => request<{ status: string }>({ url: '/health', method: 'GET' }),
   listIndices: () => request<IndexMeta[]>({ url: '/meta/indices', method: 'GET' }),
+  getDecisionDashboard: (limit = 8) => request<DecisionDashboardResponse>({ url: '/analysis/dashboard', method: 'GET', params: { limit } }),
+  listBuiltInStrategies: () => request<StrategyDefinition[]>({ url: '/analysis/strategies', method: 'GET' }),
+  scanBuiltInStrategy: (strategyKey: string, params?: { limit?: number; holding_days?: number }) =>
+    request<StrategyScanResponse>({ url: `/analysis/strategies/${encodeURIComponent(strategyKey)}`, method: 'GET', params }),
+  getPatternRadar: (params?: { limit?: number; signal?: 'bullish' | 'bearish' | 'neutral' | 'all' }) =>
+    request<PatternRadarResponse>({ url: '/analysis/patterns', method: 'GET', params }),
   runScreener: (data: ScreeningRequest) => request<ScreeningResult>({ url: '/screener/run', method: 'POST', data }),
   parseText: (text: string) => request<ScreeningRequest>({ url: '/ai/parse', method: 'POST', data: { text } }),
   oneClickRecommend: (data: { risk_preference: 'conservative' | 'balanced' | 'aggressive'; limit?: number; include_search?: boolean; focus_themes?: string[] }) =>

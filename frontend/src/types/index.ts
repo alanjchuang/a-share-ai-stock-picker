@@ -152,6 +152,93 @@ export interface StockMarketResponse {
   factor_universe_count: number;
 }
 
+export interface IndustryHeatItem {
+  industry: string;
+  count: number;
+  avg_pct_chg: number;
+  avg_ai_score: number;
+  up_ratio: number;
+}
+
+export interface KlinePatternHit {
+  ts_code: string;
+  name: string;
+  industry?: string | null;
+  pattern: string;
+  signal: 'bullish' | 'bearish' | 'neutral';
+  strength: number;
+  trade_date?: string | null;
+  close?: number | null;
+  pct_chg?: number | null;
+  reason: string;
+  stock?: StockScore | null;
+}
+
+export interface StrategyDefinition {
+  key: string;
+  name: string;
+  category: string;
+  description: string;
+  risk_level: 'low' | 'medium' | 'high';
+}
+
+export interface StrategyHit {
+  ts_code: string;
+  name: string;
+  industry?: string | null;
+  strategy_key: string;
+  strategy_name: string;
+  signal_score: number;
+  reason: string;
+  stock: StockScore;
+}
+
+export interface StrategyBacktestSummary {
+  sample_count: number;
+  win_rate: number;
+  avg_return: number;
+  median_return: number;
+  max_return: number;
+  min_return: number;
+  holding_days: number;
+}
+
+export interface StrategyScanResponse {
+  strategy: StrategyDefinition;
+  total: number;
+  rows: StrategyHit[];
+  backtest: StrategyBacktestSummary;
+  latest_trade_date?: string | null;
+}
+
+export interface DecisionDashboardResponse {
+  latest_trade_date?: string | null;
+  total: number;
+  up_count: number;
+  down_count: number;
+  flat_count: number;
+  limit_up_count: number;
+  limit_down_count: number;
+  avg_pct_chg: number;
+  avg_ai_score: number;
+  avg_sentiment_score: number;
+  market_view: string;
+  risk_alerts: string[];
+  industry_heat: IndustryHeatItem[];
+  top_ai: StockScore[];
+  top_gainers: StockScore[];
+  top_losers: StockScore[];
+  high_risk: StockScore[];
+  strategy_hits: Array<Record<string, unknown>>;
+}
+
+export interface PatternRadarResponse {
+  total: number;
+  rows: KlinePatternHit[];
+  latest_trade_date?: string | null;
+  distribution: Record<string, number>;
+}
+
 export interface ScreeningResult {
   total: number;
   rows: StockScore[];

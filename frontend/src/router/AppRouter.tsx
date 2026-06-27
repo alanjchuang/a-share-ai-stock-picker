@@ -1,7 +1,10 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import AppLayout from '../layout/AppLayout';
+import DecisionDashboard from '../pages/DecisionDashboard';
+import PatternRadar from '../pages/PatternRadar';
 import StockDetail from '../pages/StockDetail';
 import StockMarket from '../pages/StockMarket';
+import StrategyLab from '../pages/StrategyLab';
 import StrategyManager from '../pages/StrategyManager';
 import SystemConfig from '../pages/SystemConfig';
 import WatchlistCenter from '../pages/WatchlistCenter';
@@ -19,7 +22,31 @@ const AppRouter = () => (
         path="/"
         element={
           <ProtectedRoute>
+            <DecisionDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/workbench"
+        element={
+          <ProtectedRoute>
             <Workbench />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/strategy-lab"
+        element={
+          <ProtectedRoute>
+            <StrategyLab />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patterns"
+        element={
+          <ProtectedRoute>
+            <PatternRadar />
           </ProtectedRoute>
         }
       />

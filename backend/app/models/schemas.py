@@ -139,6 +139,93 @@ class StockMarketResponse(BaseModel):
     factor_universe_count: int = 0
 
 
+class IndustryHeatItem(BaseModel):
+    industry: str
+    count: int
+    avg_pct_chg: float
+    avg_ai_score: float
+    up_ratio: float
+
+
+class KlinePatternHit(BaseModel):
+    ts_code: str
+    name: str
+    industry: str | None = None
+    pattern: str
+    signal: Literal["bullish", "bearish", "neutral"]
+    strength: float
+    trade_date: str | None = None
+    close: float | None = None
+    pct_chg: float | None = None
+    reason: str
+    stock: StockScore | None = None
+
+
+class StrategyDefinition(BaseModel):
+    key: str
+    name: str
+    category: str
+    description: str
+    risk_level: Literal["low", "medium", "high"] = "medium"
+
+
+class StrategyHit(BaseModel):
+    ts_code: str
+    name: str
+    industry: str | None = None
+    strategy_key: str
+    strategy_name: str
+    signal_score: float
+    reason: str
+    stock: StockScore
+
+
+class StrategyBacktestSummary(BaseModel):
+    sample_count: int = 0
+    win_rate: float = 0
+    avg_return: float = 0
+    median_return: float = 0
+    max_return: float = 0
+    min_return: float = 0
+    holding_days: int = 10
+
+
+class StrategyScanResponse(BaseModel):
+    strategy: StrategyDefinition
+    total: int
+    rows: list[StrategyHit]
+    backtest: StrategyBacktestSummary
+    latest_trade_date: str | None = None
+
+
+class DecisionDashboardResponse(BaseModel):
+    latest_trade_date: str | None = None
+    total: int = 0
+    up_count: int = 0
+    down_count: int = 0
+    flat_count: int = 0
+    limit_up_count: int = 0
+    limit_down_count: int = 0
+    avg_pct_chg: float = 0
+    avg_ai_score: float = 0
+    avg_sentiment_score: float = 0
+    market_view: str = ""
+    risk_alerts: list[str] = Field(default_factory=list)
+    industry_heat: list[IndustryHeatItem] = Field(default_factory=list)
+    top_ai: list[StockScore] = Field(default_factory=list)
+    top_gainers: list[StockScore] = Field(default_factory=list)
+    top_losers: list[StockScore] = Field(default_factory=list)
+    high_risk: list[StockScore] = Field(default_factory=list)
+    strategy_hits: list[dict[str, object]] = Field(default_factory=list)
+
+
+class PatternRadarResponse(BaseModel):
+    total: int
+    rows: list[KlinePatternHit]
+    latest_trade_date: str | None = None
+    distribution: dict[str, int] = Field(default_factory=dict)
+
+
 class ScreeningDiagnostics(BaseModel):
     stock_universe_count: int = 0
     factor_universe_count: int = 0

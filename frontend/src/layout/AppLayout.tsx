@@ -2,8 +2,11 @@ import {
   AreaChartOutlined,
   BarChartOutlined,
   DatabaseOutlined,
+  DashboardOutlined,
+  ExperimentOutlined,
   LineChartOutlined,
   MoonOutlined,
+  RadarChartOutlined,
   SettingOutlined,
   StarOutlined,
   StockOutlined,
@@ -103,8 +106,11 @@ const AppLayout = () => {
             selectedKeys={[location.pathname.startsWith('/stock') ? stockDetailMenuKey : location.pathname]}
             onClick={(item) => navigate(item.key)}
             items={[
-              { key: '/', icon: <AreaChartOutlined />, label: '选股工作台' },
+              { key: '/', icon: <DashboardOutlined />, label: '决策仪表盘' },
+              { key: '/workbench', icon: <AreaChartOutlined />, label: '选股工作台' },
               { key: '/markets', icon: <LineChartOutlined />, label: '行情选择' },
+              { key: '/strategy-lab', icon: <ExperimentOutlined />, label: '策略实验室' },
+              { key: '/patterns', icon: <RadarChartOutlined />, label: '形态雷达' },
               { key: '/watchlist', icon: <StarOutlined />, label: '自选股复盘' },
               { key: '/strategies', icon: <BarChartOutlined />, label: '策略管理' },
               { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
