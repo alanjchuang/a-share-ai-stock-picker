@@ -11,6 +11,7 @@ from app.services.data_repository import DataRepository
 from app.services.factor_engine import FactorEngine
 from app.services.llm_client import LlmClient
 from app.services.screener_service import ScreenerService
+from app.services.stock_news_search_service import StockNewsSearchService
 from app.utils.indicators import add_technical_indicators, safe_float
 from app.utils.number_parsing import coerce_score
 
@@ -114,7 +115,12 @@ class StockService:
             for item in self.repo.financial_history(ts_code, limit=16)
         ]
 
-        news_rows = self.repo.recent_news(ts_code, 30)
+        news_rows, news_warnings = StockNewsSearchService(self.conn).ensure_recent_news(
+            ts_code=ts_code,
+            name=base.name,
+            days=15,
+            min_real_news=3,
+        )
         news = [
             StockNewsItem(
                 id=int(item["id"]),
@@ -128,6 +134,11 @@ class StockService:
             )
             for item in news_rows
         ]
+        if news:
+            sentiment_score = round(sum(item.sentiment_score for item in news[:15]) / len(news[:15]), 2)
+            base.sentiment_score = sentiment_score
+            base.sentiment_label = self._sentiment_label(sentiment_score)
+            base.sentiment_factor_score = sentiment_score
         radar = {
             "价值": base.fundamental_score,
             "成长": self._float(row.get("revenue_yoy")),
@@ -138,12 +149,15 @@ class StockService:
         source = f"本地SQLite缓存 / {settings.market_data.provider}"
         if settings.market_data.fallback_to_demo:
             source += " / 允许DEMO兜底"
+        if any(str(item.get("source") or "").startswith("volc-search/") for item in news_rows):
+            source += " / 火山搜索新闻"
         if not kline:
             data_warnings.append("当前个股缺少可用K线，请在数据中心触发真实行情同步。")
         elif len(kline) < 30:
             data_warnings.append(f"当前仅有 {len(kline)} 条可信K线，部分均线和回测信号会偏弱；请在数据中心同步更多历史行情。")
         if not financial_history:
             data_warnings.append("当前个股缺少可用财务历史，请在数据中心触发财务数据同步。")
+        data_warnings.extend(news_warnings)
         return StockDetail(
             base=base,
             kline=kline,
@@ -275,6 +289,18 @@ class StockService:
     @staticmethod
     def _float(value: object, default: float = 0.0) -> float:
         return safe_float(value, default)
+
+    @staticmethod
+    def _sentiment_label(score: float) -> str:
+        if score >= 80:
+            return "重大利好"
+        if score >= 60:
+            return "普通利好"
+        if score >= 40:
+            return "中性"
+        if score >= 20:
+            return "普通利空"
+        return "重大利空"
 
     @staticmethod
     def _analysis_prompt(detail: StockDetail) -> str:

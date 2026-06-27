@@ -57,9 +57,9 @@ class SentimentService:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def analyze(self, request: NewsAnalyzeRequest, persist: bool = False) -> NewsSentiment:
+    def analyze(self, request: NewsAnalyzeRequest, persist: bool = False, prefer_llm: bool = True) -> NewsSentiment:
         settings = load_settings()
-        if settings.llm.provider != "heuristic" and settings.llm.api_base and settings.llm.api_key:
+        if prefer_llm and settings.llm.provider != "heuristic" and settings.llm.api_base and settings.llm.api_key:
             try:
                 result = self._llm_analyze(request)
             except Exception as exc:
