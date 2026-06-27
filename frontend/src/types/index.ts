@@ -131,6 +131,27 @@ export interface StockScore {
   metrics: Record<string, number | string | null | undefined>;
 }
 
+export interface StockMarketItem extends StockScore {
+  trade_date?: string | null;
+  total_mv?: number | null;
+  turnover_rate?: number | null;
+  volume_ratio?: number | null;
+  pct_chg_20?: number | null;
+  pct_chg_60?: number | null;
+  is_st: boolean;
+  is_paused: boolean;
+}
+
+export interface StockMarketResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  rows: StockMarketItem[];
+  latest_trade_date?: string | null;
+  industries: string[];
+  factor_universe_count: number;
+}
+
 export interface ScreeningResult {
   total: number;
   rows: StockScore[];

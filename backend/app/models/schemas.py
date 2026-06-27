@@ -118,6 +118,27 @@ class StockScore(BaseModel):
     metrics: dict[str, float | str | None] = Field(default_factory=dict)
 
 
+class StockMarketItem(StockScore):
+    trade_date: str | None = None
+    total_mv: float | None = None
+    turnover_rate: float | None = None
+    volume_ratio: float | None = None
+    pct_chg_20: float | None = None
+    pct_chg_60: float | None = None
+    is_st: bool = False
+    is_paused: bool = False
+
+
+class StockMarketResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    rows: list[StockMarketItem]
+    latest_trade_date: str | None = None
+    industries: list[str] = Field(default_factory=list)
+    factor_universe_count: int = 0
+
+
 class ScreeningDiagnostics(BaseModel):
     stock_universe_count: int = 0
     factor_universe_count: int = 0

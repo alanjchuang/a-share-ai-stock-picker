@@ -2,6 +2,7 @@ import {
   AreaChartOutlined,
   BarChartOutlined,
   DatabaseOutlined,
+  LineChartOutlined,
   MoonOutlined,
   SettingOutlined,
   StarOutlined,
@@ -103,6 +104,7 @@ const AppLayout = () => {
             onClick={(item) => navigate(item.key)}
             items={[
               { key: '/', icon: <AreaChartOutlined />, label: '选股工作台' },
+              { key: '/markets', icon: <LineChartOutlined />, label: '行情选择' },
               { key: '/watchlist', icon: <StarOutlined />, label: '自选股复盘' },
               { key: '/strategies', icon: <BarChartOutlined />, label: '策略管理' },
               { key: '/config', icon: <SettingOutlined />, label: '系统配置' },

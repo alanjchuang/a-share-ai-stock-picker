@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import AppLayout from '../layout/AppLayout';
 import StockDetail from '../pages/StockDetail';
+import StockMarket from '../pages/StockMarket';
 import StrategyManager from '../pages/StrategyManager';
 import SystemConfig from '../pages/SystemConfig';
 import WatchlistCenter from '../pages/WatchlistCenter';
@@ -19,6 +20,14 @@ const AppRouter = () => (
         element={
           <ProtectedRoute>
             <Workbench />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/markets"
+        element={
+          <ProtectedRoute>
+            <StockMarket />
           </ProtectedRoute>
         }
       />

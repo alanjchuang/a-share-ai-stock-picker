@@ -8,6 +8,7 @@ import type {
   OneClickRecommendResponse,
   StockSelectionWorkflowResult,
   StockDetail,
+  StockMarketResponse,
   StrategyOut,
   WebSearchRequest,
   WebSearchResponse,
@@ -103,6 +104,17 @@ export const api = {
     }),
   listWorkflows: () => request<WorkflowInfo[]>({ url: '/ai/workflows', method: 'GET' }),
   searchWeb: (data: WebSearchRequest) => request<WebSearchResponse>({ url: '/ai/search', method: 'POST', data }),
+  listStockMarket: (params: {
+    q?: string;
+    industry?: string;
+    rating?: string;
+    include_st?: boolean;
+    include_paused?: boolean;
+    page?: number;
+    page_size?: number;
+    sort_by?: string;
+    sort_order?: 'asc' | 'desc';
+  }) => request<StockMarketResponse>({ url: '/stocks', method: 'GET', params }),
   getStockDetail: (tsCode: string) => request<StockDetail>({ url: `/stocks/${encodeURIComponent(tsCode)}`, method: 'GET' }),
   listStrategies: () => request<StrategyOut[]>({ url: '/strategies', method: 'GET' }),
   createStrategy: (data: { name: string; remark: string; conditions: ScreeningRequest; schedule_enabled: boolean; schedule_cron: string }) =>
