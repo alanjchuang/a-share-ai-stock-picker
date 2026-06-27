@@ -21,6 +21,7 @@ from app.models.schemas import (
 from app.services.llm_client import LlmClient
 from app.services.screener_service import ScreenerService
 from app.services.web_search_service import WebSearchService
+from app.utils.number_parsing import coerce_score
 
 
 CONFIDENCE_LABELS = {
@@ -29,9 +30,13 @@ CONFIDENCE_LABELS = {
     "中高": 75.0,
     "中": 65.0,
     "中等": 65.0,
+    "中性": 60.0,
     "一般": 55.0,
     "低": 40.0,
     "较低": 35.0,
+    "high": 85.0,
+    "medium": 65.0,
+    "low": 40.0,
 }
 
 
@@ -180,26 +185,7 @@ recommendations: 数组，每项包含 ts_code,name,action,reason,risk,confidenc
 
     @staticmethod
     def _confidence_for(value: Any, fallback: float) -> float:
-        if value is None or value == "":
-            return round(float(fallback), 1)
-        if isinstance(value, str):
-            normalized = value.strip()
-            if normalized in CONFIDENCE_LABELS:
-                return CONFIDENCE_LABELS[normalized]
-            if normalized.endswith("%"):
-                normalized = normalized[:-1].strip()
-            try:
-                number = float(normalized)
-            except ValueError:
-                return round(float(fallback), 1)
-        else:
-            try:
-                number = float(value)
-            except (TypeError, ValueError):
-                return round(float(fallback), 1)
-        if 0 < number <= 1:
-            number *= 100
-        return round(max(0, min(number, 100)), 1)
+        return coerce_score(value, default=fallback, label_map=CONFIDENCE_LABELS)
 
     @staticmethod
     def _candidate_snapshot(row: Any) -> dict[str, object]:

@@ -38,10 +38,25 @@ class RecommendationServiceTest(unittest.TestCase):
         self.assertEqual(items[0].confidence, 65.0)
         self.assertEqual(items[0].source, "llm")
 
+    def test_items_from_llm_accepts_high_confidence_label(self) -> None:
+        items = self.service._items_from_llm(
+            [
+                {
+                    "ts_code": "600000.SH",
+                    "confidence": "高",
+                }
+            ],
+            self.candidates,
+            limit=8,
+        )
+
+        self.assertEqual(items[0].confidence, 85.0)
+
     def test_confidence_for_numeric_variants(self) -> None:
         self.assertEqual(self.service._confidence_for("88%", 50), 88.0)
         self.assertEqual(self.service._confidence_for(0.82, 50), 82.0)
         self.assertEqual(self.service._confidence_for("91.26", 50), 91.3)
+        self.assertEqual(self.service._confidence_for("高置信度", 50), 85.0)
 
     def test_confidence_for_unknown_value_falls_back_to_ai_score(self) -> None:
         self.assertEqual(self.service._confidence_for("unknown", 73.26), 73.3)

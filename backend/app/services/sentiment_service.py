@@ -12,6 +12,7 @@ import httpx
 from app.core.config import load_settings
 from app.models.schemas import NewsAnalyzeRequest, NewsSentiment
 from app.services.llm_client import LlmClient, extract_json
+from app.utils.number_parsing import coerce_score
 
 
 POSITIVE_KEYWORDS = {
@@ -39,6 +40,16 @@ NEGATIVE_KEYWORDS = {
     "暴雷": -28,
     "商誉减值": -16,
     "业绩下滑": -14,
+}
+
+SENTIMENT_SCORE_LABELS = {
+    "重大利好": 90.0,
+    "普通利好": 70.0,
+    "利好": 70.0,
+    "中性": 50.0,
+    "普通利空": 30.0,
+    "重大利空": 10.0,
+    "利空": 30.0,
 }
 
 
@@ -137,9 +148,10 @@ class SentimentService:
 正文：{request.content}
 """
         raw = LlmClient(settings.llm).chat_json("你是A股财经舆情打分模型。", prompt)
+        score = coerce_score(raw.get("score"), default=50, label_map=SENTIMENT_SCORE_LABELS)
         return NewsSentiment(
-            score=max(0, min(100, float(raw.get("score", 50)))),
-            label=str(raw.get("label") or self._label(float(raw.get("score", 50)))),
+            score=score,
+            label=str(raw.get("label") or self._label(score)),
             keywords=[str(item) for item in raw.get("keywords", [])],
             reason=str(raw.get("reason") or "LLM评分"),
         )

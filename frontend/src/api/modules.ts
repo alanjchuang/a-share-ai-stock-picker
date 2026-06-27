@@ -9,6 +9,7 @@ import type {
   PatternRadarResponse,
   ScreeningRequest,
   ScreeningResult,
+  OneClickRecommendJob,
   OneClickRecommendResponse,
   StockSelectionWorkflowResult,
   StockDetail,
@@ -116,7 +117,9 @@ export const api = {
   runScreener: (data: ScreeningRequest) => request<ScreeningResult>({ url: '/screener/run', method: 'POST', data }),
   parseText: (text: string) => request<ScreeningRequest>({ url: '/ai/parse', method: 'POST', data: { text } }),
   oneClickRecommend: (data: { risk_preference: 'conservative' | 'balanced' | 'aggressive'; limit?: number; include_search?: boolean; focus_themes?: string[] }) =>
-    request<OneClickRecommendResponse>({ url: '/ai/recommendations/one-click', method: 'POST', data }),
+    request<BackgroundJobResponse>({ url: '/ai/recommendations/one-click', method: 'POST', data }),
+  getOneClickRecommendJob: (jobId: number) =>
+    request<OneClickRecommendJob>({ url: `/ai/recommendations/one-click/jobs/${jobId}`, method: 'GET' }),
   runSelectionWorkflow: (text: string, workflowPath?: string) =>
     request<StockSelectionWorkflowResult>({
       url: '/ai/stock-selection-workflow',

@@ -33,6 +33,7 @@ import { api, defaultScreeningRequest } from '../api/modules';
 import { useAppStore } from '../store/useAppStore';
 import type {
   IndexMeta,
+  OneClickRecommendJob,
   OneClickRecommendResponse,
   ScreeningRequest,
   ScreeningResult,
@@ -128,12 +129,14 @@ const Workbench = () => {
   const [beginnerPreset, setBeginnerPreset] = useState<BeginnerPreset>('balanced');
   const [recommendRisk, setRecommendRisk] = useState<RecommendRisk>('balanced');
   const [recommendation, setRecommendation] = useState<OneClickRecommendResponse | null>(null);
+  const [recommendationJob, setRecommendationJob] = useState<OneClickRecommendJob | null>(null);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [aiParseError, setAiParseError] = useState<string | null>(null);
   const [workflowResult, setWorkflowResult] = useState<StockSelectionWorkflowResult | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [selectedWorkflowPath, setSelectedWorkflowPath] = useState<string | undefined>();
   const [saveOpen, setSaveOpen] = useState(false);
+  const recommendationRunning = Boolean(recommendationJob && ['queued', 'running'].includes(recommendationJob.status));
 
   useEffect(() => {
     form.setFieldsValue(defaultScreeningRequest);
@@ -149,6 +152,14 @@ const Workbench = () => {
     if (!selected) return;
     runSafely(api.getStockDetail(selected.ts_code).then(setStockDetail));
   }, [selected]);
+
+  useEffect(() => {
+    if (!recommendationRunning || !recommendationJob?.id) return undefined;
+    const timer = window.setInterval(() => {
+      runSafely(refreshRecommendationJob(recommendationJob.id));
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [recommendationJob?.id, recommendationJob?.status]);
 
   const indexOptions = useMemo(
     () =>
@@ -353,17 +364,42 @@ const Workbench = () => {
     setRecommendationError(null);
     setWorkflowResult(null);
     setRecommendation(null);
+    setRecommendationJob(null);
     try {
-      const data = await api.oneClickRecommend({
+      const job = await api.oneClickRecommend({
         risk_preference: recommendRisk,
         limit: 8,
         include_search: true
       });
-      setRecommendation(data);
-      notifySuccess('一键研究推荐完成');
+      if (!job.accepted || !job.job_id) {
+        setRecommendationError(job.message || '一键荐股任务未启动。');
+        return;
+      }
+      setRecommendationJob({
+        id: job.job_id,
+        job_type: job.job_type,
+        status: job.status,
+        message: job.message,
+        started_at: '',
+        result: null
+      });
+      notifySuccess(job.message);
+      await refreshRecommendationJob(job.job_id);
     } catch (error) {
       setRecommendationError(getRequestErrorMessage(error, '一键荐股执行失败，请检查系统配置。'));
       throw error;
+    }
+  }
+
+  async function refreshRecommendationJob(jobId: number): Promise<void> {
+    const job = await api.getOneClickRecommendJob(jobId);
+    setRecommendationJob(job);
+    if (job.status === 'success' && job.result) {
+      setRecommendation(job.result);
+      setRecommendationError(null);
+      notifySuccess('一键研究推荐完成');
+    } else if (job.status === 'failed') {
+      setRecommendationError(job.message || '一键荐股后台任务失败。');
     }
   }
 
@@ -525,8 +561,8 @@ const Workbench = () => {
                   </Button>
                 </Tooltip>
                 <Tooltip title="根据近期行情、新闻舆情和多因子评分生成研究候选">
-                  <Button icon={<ThunderboltOutlined />} onClick={() => runSafely(oneClickRecommend())}>
-                    一键荐股
+                  <Button icon={<ThunderboltOutlined />} loading={recommendationRunning} disabled={recommendationRunning} onClick={() => runSafely(oneClickRecommend())}>
+                    {recommendationRunning ? '荐股中' : '一键荐股'}
                   </Button>
                 </Tooltip>
                 <Button icon={<PlayCircleOutlined />} onClick={() => runSafely(run())}>
@@ -577,11 +613,19 @@ const Workbench = () => {
             description={workflowDescription(workflowResult)}
           />
         ) : null}
+        {recommendationRunning && recommendationJob ? (
+          <Alert
+            showIcon
+            type="info"
+            message="一键荐股后台运行中"
+            description={`#${recommendationJob.id} ${recommendationJob.message}`}
+          />
+        ) : null}
         {recommendationError ? (
           <Alert
             showIcon
             type="warning"
-            message="一键荐股需要先完成配置"
+            message={recommendationError.includes('需要先完成配置') ? '一键荐股需要先完成配置' : '一键荐股失败'}
             description={recommendationError}
             action={
               <Button size="small" type="primary" onClick={() => navigate('/config')}>

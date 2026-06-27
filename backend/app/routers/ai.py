@@ -7,7 +7,6 @@ from app.models.schemas import (
     NewsAnalyzeRequest,
     NewsSentiment,
     OneClickRecommendRequest,
-    OneClickRecommendResponse,
     ScreeningRequest,
     StockSelectionWorkflowResult,
     WebSearchRequest,
@@ -15,7 +14,7 @@ from app.models.schemas import (
     WorkflowRunRequest,
 )
 from app.services.nl_parser import NaturalLanguageParser
-from app.services.recommendation_service import RecommendationService
+from app.services.recommendation_jobs import get_one_click_recommendation_job, submit_one_click_recommendation_job
 from app.services.sentiment_service import SentimentService
 from app.services.stock_selection_workflow import StockSelectionWorkflow
 from app.services.web_search_service import WebSearchService
@@ -38,9 +37,19 @@ def run_stock_selection_workflow(payload: WorkflowRunRequest, conn=Depends(get_d
     return ok(StockSelectionWorkflow(conn).run(payload))
 
 
-@router.post("/recommendations/one-click", response_model=ApiResponse[OneClickRecommendResponse])
-def one_click_recommend(payload: OneClickRecommendRequest, conn=Depends(get_db)) -> ApiResponse[OneClickRecommendResponse]:
-    return ok(RecommendationService(conn).one_click(payload), "一键研究推荐完成")
+@router.post("/recommendations/one-click", response_model=ApiResponse[dict[str, object]])
+def one_click_recommend(payload: OneClickRecommendRequest) -> ApiResponse[dict[str, object]]:
+    job = submit_one_click_recommendation_job(payload)
+    message = "一键荐股已在后台启动" if job["accepted"] else job["message"]
+    return ok(job, message)
+
+
+@router.get("/recommendations/one-click/jobs/{job_id}", response_model=ApiResponse[dict[str, object]])
+def one_click_recommend_job(job_id: int) -> ApiResponse[dict[str, object]]:
+    job = get_one_click_recommendation_job(job_id)
+    if job is None:
+        raise ValueError("一键荐股任务不存在")
+    return ok(job)
 
 
 @router.post("/search", response_model=ApiResponse[WebSearchResponse])

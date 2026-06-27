@@ -489,6 +489,16 @@ export interface OneClickRecommendResponse {
   disclaimer: string;
 }
 
+export interface OneClickRecommendJob {
+  id: number;
+  job_type: string;
+  status: 'queued' | 'running' | 'success' | 'failed' | string;
+  message: string;
+  started_at: string;
+  finished_at?: string | null;
+  result?: OneClickRecommendResponse | null;
+}
+
 export type SearchType = 'web' | 'image' | 'web_summary';
 
 export interface WebSearchRequest {
