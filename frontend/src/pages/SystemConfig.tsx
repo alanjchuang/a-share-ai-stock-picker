@@ -27,7 +27,8 @@ const SystemConfig = () => {
 
   async function save(): Promise<void> {
     const values = await form.validateFields();
-    await api.updateConfig(values);
+    const nextConfig = await api.updateConfig(values);
+    window.dispatchEvent(new CustomEvent<AppConfig>('app-config-updated', { detail: nextConfig }));
     notifySuccess('配置已保存');
   }
 

@@ -18,7 +18,7 @@ class LlmClient:
 
     @property
     def available(self) -> bool:
-        return bool(self.config.api_base and self.config.api_key and self.config.provider != "heuristic")
+        return bool(self.config.api_base and self.config.api_key and self.config.model and self.config.provider != "heuristic")
 
     def chat_json(self, system_prompt: str, user_prompt: str, temperature: float | None = None) -> dict[str, Any]:
         content = self.chat_text(system_prompt, user_prompt, temperature=temperature, json_mode=True)

@@ -60,6 +60,15 @@ body {
   font-size: 22px;
 }
 
+.header-actions {
+  flex-shrink: 0;
+}
+
+.mode-tag {
+  margin-inline-end: 0;
+  font-weight: 700;
+}
+
 .app-sider {
   min-height: calc(100vh - 94px);
   background: #ffffff !important;
@@ -190,5 +199,11 @@ body {
 
   .brand-title {
     font-size: 15px !important;
+  }
+
+  .mode-tag {
+    max-width: 92px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }

@@ -4,6 +4,7 @@ import json
 import sqlite3
 from typing import Any
 
+from app.core.config import load_settings
 from app.models.schemas import (
     CapitalConditions,
     FundamentalConditions,
@@ -27,19 +28,38 @@ class RecommendationService:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
+        self.settings = load_settings()
         self.screener = ScreenerService(conn)
-        self.llm = LlmClient()
-        self.search = WebSearchService()
+        self.llm = LlmClient(self.settings.llm)
+        self.search = WebSearchService(self.settings.search)
 
     def one_click(self, payload: OneClickRecommendRequest) -> OneClickRecommendResponse:
+        self._validate_ready(payload)
         request = self._screening_request(payload)
         screening = self.screener.run(request)
         candidates = screening.rows[: max(payload.limit * 3, payload.limit)]
+        if not candidates:
+            raise RuntimeError("一键荐股没有命中候选股票，请先同步真实行情/刷新因子缓存，或放宽筛选条件。")
         search_context = self._search_context(payload, candidates) if payload.include_search else []
-        try:
-            return self._llm_recommend(payload, candidates, search_context)
-        except Exception:
-            return self._fallback_recommend(payload, candidates, search_context)
+        return self._llm_recommend(payload, candidates, search_context)
+
+    def _validate_ready(self, payload: OneClickRecommendRequest) -> None:
+        missing: list[str] = []
+        provider = self.settings.market_data.provider.lower()
+        if provider == "demo":
+            missing.append("当前行情数据源是演示数据，请在系统配置把默认数据源切到 AKShare、自动或 Tushare 后同步真实数据")
+        if provider == "auto" and not self.settings.akshare.enabled and not (self.settings.tushare.enabled and self.settings.tushare.token):
+            missing.append("自动数据源没有可用真实源，请启用 AKShare，或配置 Tushare Token")
+        stock_count = int(self.conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0] or 0)
+        factor_count = int(self.conn.execute("SELECT COUNT(*) FROM computed_factors").fetchone()[0] or 0)
+        if stock_count < 100 or factor_count < 100:
+            missing.append("当前股票池/因子池仍像演示数据，请先同步真实行情并等待因子缓存刷新完成")
+        if not self.llm.available:
+            missing.append("LLM 未配置，请在系统配置填写 Provider、API 地址、API Key 和模型名")
+        if payload.include_search and not self.search.available:
+            missing.append("火山搜索未配置，请在系统配置填写搜索 API Key，或关闭联网搜索")
+        if missing:
+            raise RuntimeError("一键荐股需要先完成配置：" + "；".join(missing))
 
     def _screening_request(self, payload: OneClickRecommendRequest) -> ScreeningRequest:
         themes = [theme.strip() for theme in payload.focus_themes if theme.strip()]
@@ -105,56 +125,14 @@ recommendations: 数组，每项包含 ts_code,name,action,reason,risk,confidenc
             search_context=search_context,
         )
 
-    def _fallback_recommend(
-        self,
-        payload: OneClickRecommendRequest,
-        candidates: list[Any],
-        search_context: list[dict[str, object]],
-    ) -> OneClickRecommendResponse:
-        selected = candidates[: payload.limit]
-        items = [
-            StockRecommendationItem(
-                ts_code=row.ts_code,
-                name=row.name,
-                industry=row.industry,
-                rating=row.rating,
-                ai_score=round(row.ai_score, 2),
-                action=self._action_for(row, payload.risk_preference),
-                reason=(
-                    f"AI评分{row.ai_score:.1f}，基本面{row.fundamental_score:.1f}，"
-                    f"技术{row.technical_score:.1f}，资金{row.capital_score:.1f}，舆情{row.sentiment_score:.0f}。"
-                ),
-                risk=self._risk_for(row),
-                confidence=round(min(95, max(45, row.ai_score)), 1),
-                source="fallback",
-                stock=row,
-            )
-            for row in selected
-        ]
-        return OneClickRecommendResponse(
-            market_view=f"规则引擎从当前因子池中筛出 {len(items)} 只研究候选，按综合AI评分和风险偏好排序。",
-            strategy=self._strategy_text(payload.risk_preference),
-            risk_preference=payload.risk_preference,
-            recommendations=items,
-            risk_notes=[
-                "公开行情、财务与舆情数据可能延迟，需结合公告原文复核。",
-                "一键推荐只用于缩小研究范围，不代表买卖建议。",
-                "若同一行业候选过多，需要控制组合暴露并等待确认信号。",
-            ],
-            search_context=search_context,
-        )
-
     def _search_context(self, payload: OneClickRecommendRequest, candidates: list[Any]) -> list[dict[str, object]]:
         if not self.search.available:
             return []
         names = "、".join(row.name for row in candidates[:8])
         themes = "、".join(payload.focus_themes)
         query = f"A股 今日市场 行业政策 资金流 财报 舆情 {themes} 候选股 {names}".strip()
-        try:
-            response = self.search.search(WebSearchRequest(query=query, count=8, search_type="web"))
-            return WebSearchService.compact_context(response, limit=8)
-        except Exception:
-            return []
+        response = self.search.search(WebSearchRequest(query=query, count=8, search_type="web"))
+        return WebSearchService.compact_context(response, limit=8)
 
     def _items_from_llm(self, raw_items: Any, candidates: list[Any], limit: int) -> list[StockRecommendationItem]:
         candidate_map = {row.ts_code: row for row in candidates}
@@ -186,7 +164,7 @@ recommendations: 数组，每项包含 ts_code,name,action,reason,risk,confidenc
                     break
         if items:
             return items
-        return self._fallback_recommend(OneClickRecommendRequest(limit=limit), candidates, []).recommendations
+        raise RuntimeError("LLM 未返回可用候选股，请检查模型配置、Workflow提示词或重试一键荐股。")
 
     @staticmethod
     def _candidate_snapshot(row: Any) -> dict[str, object]:
@@ -206,16 +184,6 @@ recommendations: 数组，每项包含 ts_code,name,action,reason,risk,confidenc
         }
 
     @staticmethod
-    def _action_for(row: Any, risk_preference: str) -> str:
-        if row.sentiment_score < 45:
-            return "风险复核"
-        if risk_preference == "conservative" and row.rating in {"A", "B"}:
-            return "重点观察"
-        if risk_preference == "aggressive" and row.technical_score >= 60:
-            return "等待技术确认"
-        return "纳入观察"
-
-    @staticmethod
     def _risk_for(row: Any) -> str:
         risks: list[str] = []
         if row.sentiment_score < 50:
@@ -225,11 +193,3 @@ recommendations: 数组，每项包含 ts_code,name,action,reason,risk,confidenc
         if row.pct_chg and abs(row.pct_chg) > 7:
             risks.append("短期波动较大")
         return "；".join(risks) or "需继续跟踪公告、资金流和技术位置"
-
-    @staticmethod
-    def _strategy_text(risk_preference: str) -> str:
-        if risk_preference == "conservative":
-            return "偏稳健：优先ROE、估值和舆情稳定性。"
-        if risk_preference == "aggressive":
-            return "偏进攻：优先成长、技术趋势、资金流和舆情催化。"
-        return "均衡：综合基本面、技术、资金和舆情四维度。"

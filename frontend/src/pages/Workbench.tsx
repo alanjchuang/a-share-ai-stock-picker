@@ -63,6 +63,11 @@ function diagnosticsDescription(result: ScreeningResult): string {
     .join(' ');
 }
 
+function getRequestErrorMessage(error: unknown): string {
+  const maybeError = error as { response?: { data?: { message?: string } }; message?: string };
+  return maybeError.response?.data?.message || maybeError.message || '一键荐股执行失败，请检查系统配置。';
+}
+
 function normalizeRequest(values: Partial<ScreeningRequest>): ScreeningRequest {
   return {
     ...defaultScreeningRequest,
@@ -105,6 +110,7 @@ const Workbench = () => {
   const [beginnerPreset, setBeginnerPreset] = useState<BeginnerPreset>('balanced');
   const [recommendRisk, setRecommendRisk] = useState<RecommendRisk>('balanced');
   const [recommendation, setRecommendation] = useState<OneClickRecommendResponse | null>(null);
+  const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [selectedWorkflowPath, setSelectedWorkflowPath] = useState<string | undefined>();
   const [saveOpen, setSaveOpen] = useState(false);
@@ -310,13 +316,20 @@ const Workbench = () => {
   }
 
   async function oneClickRecommend(): Promise<void> {
-    const data = await api.oneClickRecommend({
-      risk_preference: recommendRisk,
-      limit: 8,
-      include_search: true
-    });
-    setRecommendation(data);
-    notifySuccess('一键研究推荐完成');
+    setRecommendationError(null);
+    setRecommendation(null);
+    try {
+      const data = await api.oneClickRecommend({
+        risk_preference: recommendRisk,
+        limit: 8,
+        include_search: true
+      });
+      setRecommendation(data);
+      notifySuccess('一键研究推荐完成');
+    } catch (error) {
+      setRecommendationError(getRequestErrorMessage(error));
+      throw error;
+    }
   }
 
   async function refreshDataInBackground(): Promise<void> {
@@ -326,6 +339,7 @@ const Workbench = () => {
 
   return (
     <div className={workbenchMode === 'professional' ? 'workbench-grid' : 'workbench-grid beginner'}>
+      {workbenchMode === 'professional' ? null : <Form form={form} component={false} />}
       {workbenchMode === 'professional' ? (
       <ProCard className="filter-panel" title="筛选条件" bordered>
         <ProForm<ScreeningRequest> form={form} submitter={false} layout="vertical">
@@ -507,6 +521,19 @@ const Workbench = () => {
             description={diagnosticsDescription(result)}
           />
         ) : null}
+        {recommendationError ? (
+          <Alert
+            showIcon
+            type="warning"
+            message="一键荐股需要先完成配置"
+            description={recommendationError}
+            action={
+              <Button size="small" type="primary" onClick={() => navigate('/config')}>
+                去配置
+              </Button>
+            }
+          />
+        ) : null}
         {recommendation ? (
           <ProCard bordered title={`一键荐股 · ${recommendation.risk_preference}`}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -561,7 +588,7 @@ const Workbench = () => {
           <FactorCharts result={result} stockDetail={stockDetail} />
         </ProCard>
       </Space>
-      <Modal title="保存当前策略" open={saveOpen} onCancel={() => setSaveOpen(false)} onOk={() => runSafely(saveStrategy())} destroyOnHidden>
+      <Modal title="保存当前策略" open={saveOpen} onCancel={() => setSaveOpen(false)} onOk={() => runSafely(saveStrategy())} destroyOnHidden forceRender>
         <ProForm form={saveForm} submitter={false} layout="vertical" initialValues={{ schedule_enabled: false, schedule_cron: '30 18 * * 1-5' }}>
           <ProFormTextArea name="name" label="策略名称" rules={[{ required: true, message: '请输入策略名称' }]} fieldProps={{ autoSize: { minRows: 1, maxRows: 1 } }} />
           <ProFormTextArea name="remark" label="备注" fieldProps={{ autoSize: { minRows: 2, maxRows: 3 } }} />
