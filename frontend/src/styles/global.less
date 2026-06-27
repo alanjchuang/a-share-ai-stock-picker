@@ -138,6 +138,23 @@ body {
   text-align: center;
 }
 
+.recommendation-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.recommendation-item {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d8e0e4;
+  border-radius: 8px;
+}
+
+.dark .recommendation-item {
+  border-color: #2b333b;
+}
+
 .news-list .ant-list-item {
   align-items: flex-start;
 }
@@ -153,6 +170,10 @@ body {
   }
 
   .chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .recommendation-list {
     grid-template-columns: 1fr;
   }
 }

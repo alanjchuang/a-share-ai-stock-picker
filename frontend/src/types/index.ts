@@ -291,6 +291,30 @@ export interface WatchlistNote {
   created_at: string;
 }
 
+export interface StockRecommendationItem {
+  ts_code: string;
+  name: string;
+  industry?: string | null;
+  rating: string;
+  ai_score: number;
+  action: string;
+  reason: string;
+  risk: string;
+  confidence: number;
+  source: 'llm' | 'fallback';
+  stock?: StockScore | null;
+}
+
+export interface OneClickRecommendResponse {
+  market_view: string;
+  strategy: string;
+  risk_preference: string;
+  recommendations: StockRecommendationItem[];
+  risk_notes: string[];
+  search_context: Array<Record<string, unknown>>;
+  disclaimer: string;
+}
+
 export type SearchType = 'web' | 'image' | 'web_summary';
 
 export interface WebSearchRequest {

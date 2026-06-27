@@ -5,7 +5,8 @@ import {
   RobotOutlined,
   SaveOutlined,
   StarOutlined,
-  SyncOutlined
+  SyncOutlined,
+  ThunderboltOutlined
 } from '@ant-design/icons';
 import {
   Button,
@@ -30,7 +31,7 @@ import * as XLSX from 'xlsx';
 import FactorCharts from '../components/FactorCharts';
 import { api, defaultScreeningRequest } from '../api/modules';
 import { useAppStore } from '../store/useAppStore';
-import type { IndexMeta, ScreeningRequest, ScreeningResult, StockDetail, StockScore, WorkflowInfo, WorkbenchMode } from '../types';
+import type { IndexMeta, OneClickRecommendResponse, ScreeningRequest, ScreeningResult, StockDetail, StockScore, WorkflowInfo, WorkbenchMode } from '../types';
 
 const ratingColor: Record<string, string> = {
   A: 'green',
@@ -40,6 +41,7 @@ const ratingColor: Record<string, string> = {
 };
 
 type BeginnerPreset = 'balanced' | 'value' | 'growth' | 'sentiment';
+type RecommendRisk = 'conservative' | 'balanced' | 'aggressive';
 
 function normalizeRequest(values: Partial<ScreeningRequest>): ScreeningRequest {
   return {
@@ -81,6 +83,8 @@ const Workbench = () => {
   const [stockDetail, setStockDetail] = useState<StockDetail | null>(null);
   const [aiText, setAiText] = useState('');
   const [beginnerPreset, setBeginnerPreset] = useState<BeginnerPreset>('balanced');
+  const [recommendRisk, setRecommendRisk] = useState<RecommendRisk>('balanced');
+  const [recommendation, setRecommendation] = useState<OneClickRecommendResponse | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [selectedWorkflowPath, setSelectedWorkflowPath] = useState<string | undefined>();
   const [saveOpen, setSaveOpen] = useState(false);
@@ -285,6 +289,16 @@ const Workbench = () => {
     message.success(`${record.name} 已加入自选股`);
   }
 
+  async function oneClickRecommend(): Promise<void> {
+    const data = await api.oneClickRecommend({
+      risk_preference: recommendRisk,
+      limit: 8,
+      include_search: true
+    });
+    setRecommendation(data);
+    message.success('一键研究推荐完成');
+  }
+
   return (
     <div className={workbenchMode === 'professional' ? 'workbench-grid' : 'workbench-grid beginner'}>
       {workbenchMode === 'professional' ? (
@@ -400,6 +414,15 @@ const Workbench = () => {
                     { label: '专业模式', value: 'professional' }
                   ]}
                 />
+                <Segmented<RecommendRisk>
+                  value={recommendRisk}
+                  onChange={setRecommendRisk}
+                  options={[
+                    { label: '稳健', value: 'conservative' },
+                    { label: '均衡', value: 'balanced' },
+                    { label: '进攻', value: 'aggressive' }
+                  ]}
+                />
                 <Select
                   value={selectedWorkflowPath}
                   onChange={setSelectedWorkflowPath}
@@ -427,6 +450,11 @@ const Workbench = () => {
                     AI解析选股
                   </Button>
                 </Tooltip>
+                <Tooltip title="根据近期行情、新闻舆情和多因子评分生成研究候选">
+                  <Button icon={<ThunderboltOutlined />} onClick={() => void oneClickRecommend()}>
+                    一键荐股
+                  </Button>
+                </Tooltip>
                 <Button icon={<PlayCircleOutlined />} onClick={() => void run()}>
                   执行选股
                 </Button>
@@ -446,6 +474,36 @@ const Workbench = () => {
             </div>
           </Space>
         </ProCard>
+        {recommendation ? (
+          <ProCard bordered title={`一键荐股 · ${recommendation.risk_preference}`}>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Typography.Paragraph>{recommendation.market_view}</Typography.Paragraph>
+              <Typography.Text type="secondary">{recommendation.strategy}</Typography.Text>
+              <div className="recommendation-list">
+                {recommendation.recommendations.map((item) => (
+                  <div className="recommendation-item" key={item.ts_code}>
+                    <Space wrap align="center">
+                      <Button type="link" onClick={() => navigate(`/stock/${item.ts_code}`)}>
+                        {item.name} · {item.ts_code}
+                      </Button>
+                      <Tag color={ratingColor[item.rating] ?? 'default'}>{item.rating} {item.ai_score.toFixed(1)}</Tag>
+                      <Tag color={item.source === 'llm' ? 'blue' : 'default'}>{item.source === 'llm' ? 'LLM' : '规则'}</Tag>
+                      <Typography.Text strong>{item.action}</Typography.Text>
+                    </Space>
+                    <Typography.Paragraph ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>{item.reason}</Typography.Paragraph>
+                    <Typography.Text type="warning">{item.risk}</Typography.Text>
+                  </div>
+                ))}
+              </div>
+              <Space direction="vertical" size={4}>
+                {recommendation.risk_notes.map((note) => (
+                  <Typography.Text key={note} type="secondary">· {note}</Typography.Text>
+                ))}
+                <Typography.Text type="secondary">{recommendation.disclaimer}</Typography.Text>
+              </Space>
+            </Space>
+          </ProCard>
+        ) : null}
         <StatisticCard.Group direction="row">
           <StatisticCard statistic={{ title: '命中股票', value: result?.total ?? 0 }} />
           <StatisticCard statistic={{ title: '平均AI评分', value: ((result?.factor_distribution.ai ?? []).reduce((sum, item) => sum + item, 0) / Math.max(1, result?.factor_distribution.ai?.length ?? 0)).toFixed(1) }} />

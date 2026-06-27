@@ -4,6 +4,7 @@ import type {
   IndexMeta,
   ScreeningRequest,
   ScreeningResult,
+  OneClickRecommendResponse,
   StockSelectionWorkflowResult,
   StockDetail,
   StrategyOut,
@@ -91,6 +92,8 @@ export const api = {
   listIndices: () => request<IndexMeta[]>({ url: '/meta/indices', method: 'GET' }),
   runScreener: (data: ScreeningRequest) => request<ScreeningResult>({ url: '/screener/run', method: 'POST', data }),
   parseText: (text: string) => request<ScreeningRequest>({ url: '/ai/parse', method: 'POST', data: { text } }),
+  oneClickRecommend: (data: { risk_preference: 'conservative' | 'balanced' | 'aggressive'; limit?: number; include_search?: boolean; focus_themes?: string[] }) =>
+    request<OneClickRecommendResponse>({ url: '/ai/recommendations/one-click', method: 'POST', data }),
   runSelectionWorkflow: (text: string, workflowPath?: string) =>
     request<StockSelectionWorkflowResult>({
       url: '/ai/stock-selection-workflow',

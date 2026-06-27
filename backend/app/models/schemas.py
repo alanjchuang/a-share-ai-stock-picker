@@ -189,6 +189,37 @@ class WebSearchResponse(BaseModel):
     time_cost_ms: int | None = None
 
 
+class OneClickRecommendRequest(BaseModel):
+    risk_preference: Literal["conservative", "balanced", "aggressive"] = "balanced"
+    limit: int = Field(default=8, ge=1, le=30)
+    include_search: bool = True
+    focus_themes: list[str] = Field(default_factory=list)
+
+
+class StockRecommendationItem(BaseModel):
+    ts_code: str
+    name: str
+    industry: str | None = None
+    rating: str
+    ai_score: float
+    action: str
+    reason: str
+    risk: str
+    confidence: float
+    source: Literal["llm", "fallback"] = "fallback"
+    stock: StockScore | None = None
+
+
+class OneClickRecommendResponse(BaseModel):
+    market_view: str
+    strategy: str
+    risk_preference: str
+    recommendations: list[StockRecommendationItem]
+    risk_notes: list[str] = Field(default_factory=list)
+    search_context: list[dict[str, object]] = Field(default_factory=list)
+    disclaimer: str = "本功能仅基于公开数据做统计研究，不构成任何投资建议。"
+
+
 class WorkflowStepTrace(BaseModel):
     id: str
     name: str
