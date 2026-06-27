@@ -12,6 +12,7 @@ from app.core.config import load_settings
 from app.core.rate_limit import SimpleRateLimitMiddleware
 from app.db.database import get_connection, init_db
 from app.db.seed import ensure_demo_data
+from app.services.background_jobs import mark_interrupted_jobs
 from app.services.data_quality_service import DataQualityService
 from app.routers import ai, analysis, config, factors, health, meta, reports, screener, stocks, strategies, sync, watchlists
 from app.services.factor_engine import FactorEngine
@@ -23,6 +24,7 @@ async def lifespan(_: FastAPI):
     init_db()
     conn = get_connection()
     try:
+        mark_interrupted_jobs(conn)
         ensure_demo_data(conn)
         quality_result = DataQualityService(conn).clean_mixed_demo_rows()
         existing = conn.execute("SELECT COUNT(*) FROM computed_factors").fetchone()[0]

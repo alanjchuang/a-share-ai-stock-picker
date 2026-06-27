@@ -134,6 +134,8 @@ export const api = {
     sort_order?: 'asc' | 'desc';
   }) => request<StockMarketResponse>({ url: '/stocks', method: 'GET', params }),
   getStockDetail: (tsCode: string) => request<StockDetail>({ url: `/stocks/${encodeURIComponent(tsCode)}`, method: 'GET' }),
+  syncStockHistory: (tsCode: string) =>
+    request<BackgroundJobResponse>({ url: `/stocks/${encodeURIComponent(tsCode)}/history/sync`, method: 'POST' }),
   listStrategies: () => request<StrategyOut[]>({ url: '/strategies', method: 'GET' }),
   createStrategy: (data: { name: string; remark: string; conditions: ScreeningRequest; schedule_enabled: boolean; schedule_cron: string }) =>
     request<StrategyOut>({ url: '/strategies', method: 'POST', data }),

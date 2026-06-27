@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from app.core.response import ApiResponse, ok
 from app.db.database import get_db
 from app.models.schemas import StockDetail, StockMarketResponse
+from app.services.background_jobs import submit_stock_history_job
 from app.services.stock_service import StockService
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
@@ -39,3 +40,10 @@ def list_market(
 @router.get("/{ts_code}", response_model=ApiResponse[StockDetail])
 def detail(ts_code: str, conn=Depends(get_db)) -> ApiResponse[StockDetail]:
     return ok(StockService(conn).detail(ts_code))
+
+
+@router.post("/{ts_code}/history/sync", response_model=ApiResponse[dict])
+def sync_stock_history(ts_code: str) -> ApiResponse[dict]:
+    job = submit_stock_history_job(ts_code)
+    message = job["message"] if not job["accepted"] else "历史K线补齐已在后台启动"
+    return ok(job, message)

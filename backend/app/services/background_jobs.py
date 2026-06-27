@@ -8,6 +8,7 @@ from typing import Any
 
 from app.db.database import get_connection
 from app.models.schemas import SyncRequest
+from app.services.akshare_service import AkshareService
 from app.services.factor_engine import FactorEngine
 from app.services.data_quality_service import DataQualityService
 from app.services.market_data_service import MarketDataService
@@ -53,6 +54,25 @@ def _update_job(conn: sqlite3.Connection, job_id: int, status: str, message: str
     else:
         conn.execute("UPDATE sync_jobs SET status=?, message=? WHERE id=?", (status, message, job_id))
     conn.commit()
+
+
+def mark_interrupted_jobs(conn: sqlite3.Connection) -> int:
+    """服务重启后清理遗留任务状态。
+
+    后台任务只存在于当前进程内；如果服务在任务执行中被重启，SQLite里的 running/queued
+    记录不会自动完成。启动时把这些记录标记为 failed，避免数据中心误以为旧任务仍在执行。
+    """
+    cursor = conn.execute(
+        """
+        UPDATE sync_jobs
+        SET status='failed',
+            message=message || '（服务已重启，任务已中断，请重新触发。）',
+            finished_at=CURRENT_TIMESTAMP
+        WHERE status IN ('queued', 'running') AND finished_at IS NULL
+        """
+    )
+    conn.commit()
+    return int(cursor.rowcount or 0)
 
 
 def _clear_active(job_id: int) -> None:
@@ -173,6 +193,16 @@ def _factor_task(force: bool) -> JobTask:
     return task
 
 
+def _stock_history_task(ts_code: str) -> JobTask:
+    def task(conn: sqlite3.Connection) -> dict[str, Any]:
+        sync_result = AkshareService(conn).sync_stock_history(ts_code)
+        quality_result = DataQualityService(conn).clean_mixed_demo_rows()
+        factor_rows = FactorEngine(conn).calculate_all(force=True)
+        return {"sync": sync_result, "quality": quality_result, "factor_count": len(factor_rows)}
+
+    return task
+
+
 def submit_sync_refresh_job(payload: SyncRequest) -> dict[str, Any]:
     return submit_exclusive_db_job(
         "manual_sync",
@@ -190,6 +220,19 @@ def submit_factor_refresh_job(force: bool = True, job_type: str = "manual_factor
         "正在后台刷新因子缓存。",
         _factor_task(force),
         lambda result: f"因子缓存已刷新：{result.get('factor_count', 0)} 只股票。",
+    )
+
+
+def submit_stock_history_job(ts_code: str) -> dict[str, Any]:
+    return submit_exclusive_db_job(
+        "stock_history_sync",
+        f"{ts_code} 历史K线补齐已进入后台队列，前台继续使用现有缓存。",
+        f"正在后台补齐 {ts_code} 历史K线并刷新因子缓存。",
+        _stock_history_task(ts_code),
+        lambda result: (
+            f"{ts_code} 历史K线补齐完成，新增/覆盖 "
+            f"{result.get('sync', {}).get('rows', 0)} 条K线，因子缓存覆盖 {result.get('factor_count', 0)} 只股票。"
+        ),
     )
 
 

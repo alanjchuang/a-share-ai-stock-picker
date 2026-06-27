@@ -57,6 +57,7 @@ const StockDetail = () => {
   const { tsCode } = useParams<{ tsCode: string }>();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<StockDetailType | null>(null);
+  const [historySyncing, setHistorySyncing] = useState(false);
 
   const load = () => {
     if (tsCode) runSafely(api.getStockDetail(tsCode).then(setDetail));
@@ -74,6 +75,22 @@ const StockDetail = () => {
       { title: '舆情分', value: detail.base.sentiment_score.toFixed(0), suffix: detail.base.sentiment_label }
     ];
   }, [detail]);
+
+  const needsHistorySync = useMemo(() => {
+    if (!detail) return false;
+    return detail.kline.length < 30 || detail.data_warnings.some((warning) => warning.includes('K线'));
+  }, [detail]);
+
+  async function syncHistory(): Promise<void> {
+    if (!detail) return;
+    setHistorySyncing(true);
+    try {
+      const job = await api.syncStockHistory(detail.base.ts_code);
+      notifySuccess(job.message || '历史K线补齐已在后台启动');
+    } finally {
+      setHistorySyncing(false);
+    }
+  }
 
   async function addToWatchlist(): Promise<void> {
     if (!detail) return;
@@ -112,6 +129,13 @@ const StockDetail = () => {
             type={detail.data_warnings.length ? 'warning' : 'info'}
             message={`行情来源：${detail.data_source}`}
             description={detail.data_warnings.length ? detail.data_warnings.join('；') : '行情、财务和因子均来自本地SQLite缓存；可在数据中心查看同步状态和缓存覆盖。'}
+            action={
+              needsHistorySync ? (
+                <Button size="small" icon={<ReloadOutlined />} loading={historySyncing} onClick={() => runSafely(syncHistory())}>
+                  后台补齐历史K线
+                </Button>
+              ) : undefined
+            }
           />
           <StatisticCard.Group>
             {metricCards.map((item) => (

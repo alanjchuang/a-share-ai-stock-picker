@@ -83,6 +83,44 @@ class AkshareService:
         self.conn.commit()
         return summary
 
+    def sync_stock_history(self, ts_code: str, start_date: str | None = None, end_date: str | None = None) -> dict[str, Any]:
+        """按需补齐单只股票历史K线。
+
+        全市场历史K线拉取会触发数千次网页请求，因此批量同步默认有限流上限。
+        个股详情页需要更完整的K线时，走这个单股接口可以快速补齐，不影响其他页面读缓存。
+        """
+        if not self.settings.akshare.enabled:
+            raise RuntimeError("AKShare数据源已在配置中禁用")
+
+        symbol = self._symbol(ts_code)
+        safe_start_date = start_date or self.settings.akshare.default_start_date
+        safe_end_date = end_date or self.settings.akshare.default_end_date or self._last_workday()
+        summary: dict[str, Any] = {
+            "mode": "akshare",
+            "task": "single_stock_history",
+            "ts_code": self._ts_code(symbol),
+            "start_date": safe_start_date,
+            "end_date": safe_end_date,
+            "warnings": [],
+        }
+        hist = self._safe_call(
+            f"{symbol}历史行情",
+            self.ak.stock_zh_a_hist,
+            symbol=symbol,
+            period="daily",
+            start_date=safe_start_date,
+            end_date=safe_end_date,
+            adjust=self.settings.akshare.adjust,
+            summary=summary,
+        )
+        if hist is None or hist.empty:
+            raise RuntimeError(f"AKShare未返回 {self._ts_code(symbol)} 的历史K线")
+
+        rows = self._insert_history(symbol, hist)
+        self.conn.commit()
+        summary["rows"] = rows
+        return summary
+
     def _sync_spot_stocks(self, df: pd.DataFrame) -> int:
         count = 0
         metadata = self._metadata_for_symbols(df["代码"].head(max(0, self.settings.akshare.max_metadata_symbols)).tolist())
