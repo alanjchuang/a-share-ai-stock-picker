@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import AppLayout from '../layout/AppLayout';
 import DataCenter from '../pages/DataCenter';
 import DecisionDashboard from '../pages/DecisionDashboard';
+import IntelligenceCenter from '../pages/IntelligenceCenter';
 import PatternRadar from '../pages/PatternRadar';
 import ReportCenter from '../pages/ReportCenter';
 import StockDetail from '../pages/StockDetail';
@@ -73,6 +74,14 @@ const AppRouter = () => (
         element={
           <ProtectedRoute>
             <DataCenter />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/intelligence"
+        element={
+          <ProtectedRoute>
+            <IntelligenceCenter />
           </ProtectedRoute>
         }
       />
