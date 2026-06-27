@@ -1,6 +1,7 @@
 import { request } from './http';
 import type {
   AppConfig,
+  BackgroundJobResponse,
   IndexMeta,
   ScreeningRequest,
   ScreeningResult,
@@ -114,12 +115,12 @@ export const api = {
   getConfig: () => request<AppConfig>({ url: '/config', method: 'GET' }),
   updateConfig: (data: Partial<AppConfig>) => request<AppConfig>({ url: '/config', method: 'PUT', data }),
   syncData: (provider?: AppConfig['market_data']['provider']) =>
-    request<Record<string, unknown>>({
+    request<BackgroundJobResponse>({
       url: '/sync/run',
       method: 'POST',
       data: { provider, sync_news: true, sync_fundamentals: true, sync_indices: true }
     }),
-  calculateFactors: () => request<{ count: number }>({ url: '/factors/calculate', method: 'POST' }),
+  calculateFactors: () => request<BackgroundJobResponse>({ url: '/factors/calculate', method: 'POST' }),
   listWatchlistGroups: () => request<WatchlistGroup[]>({ url: '/watchlists/groups', method: 'GET' }),
   createWatchlistGroup: (data: { name: string; description?: string; color?: string; sort_order?: number }) =>
     request<WatchlistGroup>({ url: '/watchlists/groups', method: 'POST', data }),

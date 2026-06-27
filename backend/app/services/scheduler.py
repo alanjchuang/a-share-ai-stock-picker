@@ -1,51 +1,20 @@
-from __future__ import annotations
-
-import sqlite3
-
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.config import load_settings
-from app.db.database import get_connection
-from app.models.schemas import SyncRequest
-from app.services.factor_engine import FactorEngine
-from app.services.market_data_service import MarketDataService
-from app.services.sentiment_service import SentimentService
+from app.services.background_jobs import run_scheduled_factor_cache_job, run_scheduled_sync_job
 
 
 scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
 
 def daily_sync_job() -> None:
-    conn: sqlite3.Connection | None = None
-    try:
-        conn = get_connection()
-        conn.execute("INSERT INTO sync_jobs(job_type, status, message) VALUES ('daily_sync', 'running', '')")
-        MarketDataService(conn).sync(SyncRequest())
-        SentimentService(conn).batch_refresh_existing(limit=300)
-        FactorEngine(conn).calculate_all(force=True)
-        conn.execute(
-            """
-            UPDATE sync_jobs
-            SET status='success', message='同步完成', finished_at=CURRENT_TIMESTAMP
-            WHERE id=(SELECT MAX(id) FROM sync_jobs WHERE job_type='daily_sync')
-            """
-        )
-        conn.commit()
-    except Exception as exc:
-        if conn:
-            conn.execute(
-                """
-                UPDATE sync_jobs
-                SET status='failed', message=?, finished_at=CURRENT_TIMESTAMP
-                WHERE id=(SELECT MAX(id) FROM sync_jobs WHERE job_type='daily_sync')
-                """,
-                (str(exc),),
-            )
-            conn.commit()
-    finally:
-        if conn:
-            conn.close()
+    run_scheduled_sync_job()
+
+
+def factor_cache_refresh_job() -> None:
+    run_scheduled_factor_cache_job()
 
 
 def start_scheduler() -> None:
@@ -57,6 +26,15 @@ def start_scheduler() -> None:
     except ValueError:
         trigger = CronTrigger(hour=18, minute=30, day_of_week="mon-fri", timezone="Asia/Shanghai")
     scheduler.add_job(daily_sync_job, trigger=trigger, id="daily_sync", replace_existing=True, max_instances=1)
+    if settings.scheduler.factor_cache_refresh_minutes > 0:
+        scheduler.add_job(
+            factor_cache_refresh_job,
+            trigger=IntervalTrigger(minutes=max(1, settings.scheduler.factor_cache_refresh_minutes), timezone="Asia/Shanghai"),
+            id="factor_cache_refresh",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
     scheduler.start()
 
 

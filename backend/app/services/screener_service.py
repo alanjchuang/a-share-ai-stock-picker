@@ -22,8 +22,9 @@ class ScreenerService:
         base_filtered: list[dict[str, Any]] = []
         excluded_counts: Counter[str] = Counter()
         missing_list_date_count = 0
+        base_options = self._resolve_base_options(request)
         for row in rows:
-            passed, reason = self._base_filter_result(row, request)
+            passed, reason = self._base_filter_result(row, base_options)
             if passed:
                 base_filtered.append(row)
                 if reason == "missing_list_date":
@@ -53,8 +54,8 @@ class ScreenerService:
         matched.sort(key=lambda item: float(item.get("ai_score") or 0), reverse=True)
         limited = matched[: request.limit]
         stock_rows = [self._to_stock_score(row) for row in limited]
-        warnings = self._diagnostic_warnings(request, rows, missing_list_date_count)
         stock_count = self.conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
+        warnings = self._diagnostic_warnings(request, rows, int(stock_count or 0), missing_list_date_count)
         return ScreeningResult(
             total=len(matched),
             rows=stock_rows,
@@ -81,21 +82,27 @@ class ScreenerService:
         )
 
     def _pass_base_filters(self, row: dict[str, Any], request: ScreeningRequest) -> bool:
-        return self._base_filter_result(row, request)[0]
+        return self._base_filter_result(row, self._resolve_base_options(request))[0]
 
-    def _base_filter_result(self, row: dict[str, Any], request: ScreeningRequest) -> tuple[bool, str | None]:
+    @staticmethod
+    def _resolve_base_options(request: ScreeningRequest) -> dict[str, Any]:
         settings = load_settings()
-        exclude_st = request.filters.exclude_st if request.filters.exclude_st is not None else settings.filters.exclude_st
-        exclude_paused = request.filters.exclude_paused if request.filters.exclude_paused is not None else settings.filters.exclude_paused
-        new_stock_days = request.filters.new_stock_days if request.filters.new_stock_days is not None else settings.filters.new_stock_days
-        min_market_cap = request.filters.min_market_cap if request.filters.min_market_cap is not None else settings.filters.min_market_cap
+        return {
+            "exclude_st": request.filters.exclude_st if request.filters.exclude_st is not None else settings.filters.exclude_st,
+            "exclude_paused": request.filters.exclude_paused if request.filters.exclude_paused is not None else settings.filters.exclude_paused,
+            "new_stock_days": request.filters.new_stock_days if request.filters.new_stock_days is not None else settings.filters.new_stock_days,
+            "min_market_cap": request.filters.min_market_cap if request.filters.min_market_cap is not None else settings.filters.min_market_cap,
+        }
 
-        if exclude_st and int(row.get("is_st") or 0):
+    def _base_filter_result(self, row: dict[str, Any], options: dict[str, Any]) -> tuple[bool, str | None]:
+        if options["exclude_st"] and int(row.get("is_st") or 0):
             return False, "ST/*ST"
-        if exclude_paused and int(row.get("is_paused") or 0):
+        if options["exclude_paused"] and int(row.get("is_paused") or 0):
             return False, "停牌"
+        min_market_cap = options["min_market_cap"]
         if min_market_cap and float(row.get("total_mv") or 0) < min_market_cap:
             return False, "低于最小市值"
+        new_stock_days = options["new_stock_days"]
         if new_stock_days:
             list_date = str(row.get("list_date") or "")
             try:
@@ -108,7 +115,12 @@ class ScreenerService:
         return True, None
 
     @staticmethod
-    def _diagnostic_warnings(request: ScreeningRequest, rows: list[dict[str, Any]], missing_list_date_count: int) -> list[str]:
+    def _diagnostic_warnings(
+        request: ScreeningRequest,
+        rows: list[dict[str, Any]],
+        stock_count: int,
+        missing_list_date_count: int,
+    ) -> list[str]:
         warnings: list[str] = []
         if request.filters.new_stock_days and missing_list_date_count:
             warnings.append(
@@ -116,6 +128,8 @@ class ScreenerService:
             )
         if not rows:
             warnings.append("当前没有可用因子缓存，请先在系统配置中同步行情或重算因子。")
+        elif len(rows) < stock_count:
+            warnings.append(f"因子缓存仅覆盖 {len(rows)} / {stock_count} 只股票，后台已尝试预热缺失缓存。")
         return warnings
 
     def _index_condition(self, request: ScreeningRequest) -> Callable[[dict[str, Any]], bool] | None:

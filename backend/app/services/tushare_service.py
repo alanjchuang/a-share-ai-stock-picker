@@ -43,11 +43,15 @@ class TushareService:
 
         summary: dict[str, Any] = {"mode": "tushare", "trade_date": trade_date, "tables": {}}
         summary["tables"]["stocks"] = self._sync_stock_basic(pro)
+        self.conn.commit()
         summary["tables"]["daily"] = self._sync_daily(pro, trade_date, start_date, end_date)
+        self.conn.commit()
         if request.sync_fundamentals:
             summary["tables"]["fundamentals"] = self._sync_daily_basic(pro, trade_date)
+            self.conn.commit()
         if request.sync_indices:
             summary["tables"]["indices"] = self._sync_indices(pro, start_date, end_date)
+            self.conn.commit()
         if request.sync_news:
             summary["tables"]["news"] = self._sync_news(pro, start_date, end_date)
         self.conn.commit()
@@ -213,7 +217,9 @@ class TushareService:
                 self._sleep()
             except Exception:
                 continue
+            self.conn.commit()
         self._recalculate_index_momentum()
+        self.conn.commit()
         return count
 
     def _sync_news(self, pro: Any, start_date: str, end_date: str) -> int:

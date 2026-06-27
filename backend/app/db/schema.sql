@@ -181,3 +181,5 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
     started_at TEXT DEFAULT CURRENT_TIMESTAMP,
     finished_at TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_started ON sync_jobs(status, started_at);

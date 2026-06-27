@@ -319,6 +319,11 @@ const Workbench = () => {
     notifySuccess('一键研究推荐完成');
   }
 
+  async function refreshDataInBackground(): Promise<void> {
+    const job = await api.syncData();
+    notifySuccess(job.message);
+  }
+
   return (
     <div className={workbenchMode === 'professional' ? 'workbench-grid' : 'workbench-grid beginner'}>
       {workbenchMode === 'professional' ? (
@@ -487,8 +492,8 @@ const Workbench = () => {
                 <Button icon={<DownloadOutlined />} onClick={exportExcel}>
                   导出Excel
                 </Button>
-                <Button icon={<SyncOutlined />} onClick={() => runSafely(api.syncData().then(() => run()))}>
-                  刷新数据
+                <Button icon={<SyncOutlined />} onClick={() => runSafely(refreshDataInBackground())}>
+                  后台刷新
                 </Button>
               </Space>
             </div>

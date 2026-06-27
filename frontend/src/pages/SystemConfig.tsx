@@ -33,13 +33,13 @@ const SystemConfig = () => {
 
   async function refresh(): Promise<void> {
     const provider = form.getFieldValue(['market_data', 'provider']) as AppConfig['market_data']['provider'] | undefined;
-    await api.syncData(provider);
-    notifySuccess('数据同步完成');
+    const job = await api.syncData(provider);
+    notifySuccess(job.message);
   }
 
   async function recalc(): Promise<void> {
-    const result = await api.calculateFactors();
-    notifySuccess(`因子缓存已刷新：${result.count} 只股票`);
+    const job = await api.calculateFactors();
+    notifySuccess(job.message);
   }
 
   async function testSearch(): Promise<void> {
@@ -86,7 +86,7 @@ const SystemConfig = () => {
               <Form.Item name={['market_data', 'fallback_to_demo']} label="失败回退演示数据" valuePropName="checked">
                 <Switch />
               </Form.Item>
-              <Form.Item name={['market_data', 'clear_factor_cache_on_sync']} label="同步前清理因子缓存" valuePropName="checked">
+              <Form.Item name={['market_data', 'clear_factor_cache_on_sync']} label="同步后覆盖因子缓存" valuePropName="checked">
                 <Switch />
               </Form.Item>
             </Space>
@@ -223,6 +223,7 @@ const SystemConfig = () => {
                 <Switch />
               </Form.Item>
               <ProFormText name={['scheduler', 'daily_sync_cron']} label="每日同步Cron" width="sm" />
+              <ProFormDigit name={['scheduler', 'factor_cache_refresh_minutes']} label="因子缓存预热间隔分钟" min={0} width="sm" />
               <ProFormText name={['server', 'host']} label="服务Host" width="sm" />
               <ProFormDigit name={['server', 'port']} label="服务端口" min={1} max={65535} />
               <ProFormSelect name={['server', 'cors_origins']} label="CORS Origins" mode="tags" width="lg" />

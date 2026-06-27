@@ -65,7 +65,9 @@ class AkshareService:
 
         spot_df = self._normalize_spot(spot_df)
         summary["tables"]["stocks"] = self._sync_spot_stocks(spot_df)
+        self.conn.commit()
         summary["tables"]["daily_spot"] = self._sync_spot_daily_and_basic(spot_df, trade_date)
+        self.conn.commit()
 
         if request.sync_indices:
             summary["tables"]["indices"] = self._sync_indices(start_date, end_date, summary)
@@ -205,6 +207,7 @@ class AkshareService:
             if hist is None or hist.empty:
                 continue
             count += self._insert_history(symbol, hist)
+            self.conn.commit()
             self._sleep()
         return count
 
@@ -255,6 +258,7 @@ class AkshareService:
                 ),
             )
             count += 1
+            self.conn.commit()
             self._sleep()
         return count
 
@@ -300,6 +304,7 @@ class AkshareService:
                     ),
                 )
                 count += 1
+            self.conn.commit()
             self._sleep()
         return count
 
@@ -331,6 +336,7 @@ class AkshareService:
                     ),
                 )
                 count += 1
+            self.conn.commit()
             self._sleep()
         return count
 
@@ -362,8 +368,10 @@ class AkshareService:
                     (index_code, self._ts_code(item["symbol"]), item.get("weight", 0), item.get("in_date") or start_date),
                 )
                 count += 1
+            self.conn.commit()
             self._sleep()
         self._recalculate_index_momentum()
+        self.conn.commit()
         return count
 
     def _sync_boards(self, spot_df: pd.DataFrame, trade_date: str, summary: dict[str, Any]) -> int:
@@ -402,6 +410,7 @@ class AkshareService:
                 """,
                 (index_code, trade_date, index_code, index_code, index_code, index_code),
             )
+            self.conn.commit()
             self._sleep()
         return count
 

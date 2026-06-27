@@ -5,19 +5,16 @@ from fastapi import APIRouter, Depends
 from app.core.response import ApiResponse, ok
 from app.db.database import get_db
 from app.models.schemas import SyncRequest
-from app.services.factor_engine import FactorEngine
-from app.services.market_data_service import MarketDataService
-from app.services.sentiment_service import SentimentService
+from app.services.background_jobs import submit_sync_refresh_job
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
 
 @router.post("/run", response_model=ApiResponse[dict[str, Any]])
-def run_sync(payload: SyncRequest, conn=Depends(get_db)) -> ApiResponse[dict[str, Any]]:
-    result = MarketDataService(conn).sync(payload)
-    SentimentService(conn).batch_refresh_existing(limit=300)
-    FactorEngine(conn).calculate_all(force=True)
-    return ok(result, "数据同步与因子刷新完成")
+def run_sync(payload: SyncRequest) -> ApiResponse[dict[str, Any]]:
+    job = submit_sync_refresh_job(payload)
+    message = job["message"] if not job["accepted"] else "数据同步与因子刷新已在后台启动"
+    return ok(job, message)
 
 
 @router.get("/jobs", response_model=ApiResponse[list[dict[str, Any]]])

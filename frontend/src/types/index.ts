@@ -10,6 +10,14 @@ export interface ApiResponse<T> {
   data: T;
 }
 
+export interface BackgroundJobResponse {
+  accepted: boolean;
+  job_id?: number | null;
+  job_type: string;
+  status: string;
+  message: string;
+}
+
 export interface RangeFilter {
   min?: number | null;
   max?: number | null;
@@ -437,5 +445,6 @@ export interface AppConfig {
   scheduler: {
     enabled: boolean;
     daily_sync_cron: string;
+    factor_cache_refresh_minutes: number;
   };
 }

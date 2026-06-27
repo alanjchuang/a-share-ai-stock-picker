@@ -110,6 +110,7 @@ class WeightConfig:
 class SchedulerConfig:
     enabled: bool = True
     daily_sync_cron: str = "30 18 * * 1-5"
+    factor_cache_refresh_minutes: int = 5
 
 
 @dataclass

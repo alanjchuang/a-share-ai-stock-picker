@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from threading import Lock
 from typing import Any
 
 import pandas as pd
@@ -8,6 +9,30 @@ import pandas as pd
 from app.core.config import WeightConfig, load_settings
 from app.services.data_repository import DataRepository
 from app.utils.indicators import add_technical_indicators, clamp, normalize_series, safe_float
+
+_factor_rows_lock = Lock()
+_factor_rows_cache: list[dict[str, Any]] | None = None
+
+
+def _clone_factor_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cloned: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        if isinstance(item.get("index_names"), list):
+            item["index_names"] = list(item["index_names"])
+        cloned.append(item)
+    return cloned
+
+
+def _read_factor_rows_cache() -> list[dict[str, Any]] | None:
+    with _factor_rows_lock:
+        return _clone_factor_rows(_factor_rows_cache) if _factor_rows_cache is not None else None
+
+
+def _write_factor_rows_cache(rows: list[dict[str, Any]]) -> None:
+    global _factor_rows_cache
+    with _factor_rows_lock:
+        _factor_rows_cache = _clone_factor_rows(rows)
 
 
 class FactorEngine:
@@ -39,13 +64,29 @@ class FactorEngine:
             payload = {key: value for key, value in row.items() if key not in {"ts_code", "symbol", "name", "industry", "index_names"}}
             self.repo.save_factor_payload(ts_code, trade_date, payload)
         self.conn.commit()
-        return self.repo.read_factor_rows()
-
-    def factor_rows(self) -> list[dict[str, Any]]:
         rows = self.repo.read_factor_rows()
+        _write_factor_rows_cache(rows)
+        return rows
+
+    def factor_rows(self, allow_blocking_refresh: bool = False) -> list[dict[str, Any]]:
+        cached_rows = _read_factor_rows_cache()
+        if cached_rows is not None:
+            return cached_rows
+        rows = self.repo.read_factor_rows()
+        if rows:
+            _write_factor_rows_cache(rows)
         stock_count = self.conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
         if len(rows) < stock_count:
-            rows = self.calculate_all(force=True)
+            if allow_blocking_refresh:
+                rows = self.calculate_all(force=True)
+            else:
+                try:
+                    from app.services.background_jobs import submit_factor_refresh_job
+
+                    submit_factor_refresh_job(force=False, job_type="auto_factor_warmup")
+                except Exception:
+                    # 普通查询必须保持只读；后台预热失败时由筛选诊断提示缓存未覆盖。
+                    pass
         return rows
 
     def _calculate_single(self, stock: dict[str, Any]) -> dict[str, Any]:

@@ -21,17 +21,22 @@ class MarketDataService:
         provider = request.provider or self.settings.market_data.provider
         provider = provider.lower()
 
-        if self.settings.market_data.clear_factor_cache_on_sync:
-            self.conn.execute("DELETE FROM computed_factors")
-
+        # 同步行情时保留旧因子缓存，前台查询就能继续读取上一版结果；
+        # 后台任务会在同步结束后用INSERT OR REPLACE覆盖新因子，避免同步期间出现空缓存或长时间锁表。
         if provider == "akshare":
-            return AkshareService(self.conn).sync(request)
+            result = AkshareService(self.conn).sync(request)
+            result["factor_cache_preserved_during_sync"] = True
+            return result
         if provider == "tushare":
-            return TushareService(self.conn).sync(request)
+            result = TushareService(self.conn).sync(request)
+            result["factor_cache_preserved_during_sync"] = True
+            return result
         if provider == "demo":
             return self._demo()
         if provider == "auto":
-            return self._auto(request)
+            result = self._auto(request)
+            result["factor_cache_preserved_during_sync"] = True
+            return result
         raise ValueError("未知数据源，请使用 auto/akshare/tushare/demo")
 
     def _auto(self, request: SyncRequest) -> dict[str, Any]:

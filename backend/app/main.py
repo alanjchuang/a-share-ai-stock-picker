@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -19,12 +20,15 @@ from app.services.scheduler import shutdown_scheduler, start_scheduler
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         ensure_demo_data(conn)
         existing = conn.execute("SELECT COUNT(*) FROM computed_factors").fetchone()[0]
         stock_count = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
         if existing < stock_count:
             FactorEngine(conn).calculate_all(force=True)
+    finally:
+        conn.close()
     start_scheduler()
     yield
     shutdown_scheduler()
@@ -67,6 +71,21 @@ async def value_error_handler(_: Request, exc: ValueError) -> JSONResponse:
 @app.exception_handler(RuntimeError)
 async def runtime_error_handler(_: Request, exc: RuntimeError) -> JSONResponse:
     return JSONResponse(status_code=400, content={"code": 400, "message": str(exc), "data": None})
+
+
+@app.exception_handler(sqlite3.OperationalError)
+async def sqlite_error_handler(_: Request, exc: sqlite3.OperationalError) -> JSONResponse:
+    message = str(exc)
+    if "database is locked" in message.lower():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": 503,
+                "message": "数据库正在后台刷新缓存，请稍后重试；选股和详情会优先读取上一版缓存。",
+                "data": None,
+            },
+        )
+    return JSONResponse(status_code=500, content={"code": 500, "message": message, "data": None})
 
 
 @app.exception_handler(HTTPException)
