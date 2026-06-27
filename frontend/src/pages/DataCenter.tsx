@@ -7,6 +7,7 @@ import { api } from '../api/modules';
 import type { DataHealthResponse, DataTableStatus, SyncJobOut } from '../types';
 import { runSafely } from '../utils/async';
 import { notifySuccess } from '../utils/feedback';
+import { formatLocalDateTime } from '../utils/time';
 
 const statusColor: Record<string, string> = {
   queued: 'blue',
@@ -116,8 +117,8 @@ const DataCenter = () => {
     { title: '任务', dataIndex: 'job_type', width: 150 },
     { title: '状态', dataIndex: 'status', width: 92, render: (_, record) => <Tag color={statusColor[record.status] ?? 'default'}>{record.status}</Tag> },
     { title: '消息', dataIndex: 'message', ellipsis: true },
-    { title: '开始', dataIndex: 'started_at', width: 170 },
-    { title: '结束', dataIndex: 'finished_at', width: 170, render: (_, record) => record.finished_at ?? '-' },
+    { title: '开始', dataIndex: 'started_at', width: 170, render: (_, record) => formatLocalDateTime(record.started_at) },
+    { title: '结束', dataIndex: 'finished_at', width: 170, render: (_, record) => formatLocalDateTime(record.finished_at) || '-' },
     {
       title: '操作',
       valueType: 'option',
