@@ -37,6 +37,9 @@ class RecommendationJobsTest(unittest.TestCase):
             )
 
             with patch.dict(os.environ, {"A_STOCK_CONFIG": config_path}), patch(
+                "app.services.recommendation_jobs.RecommendationService.readiness_errors",
+                return_value=[],
+            ), patch(
                 "app.services.recommendation_jobs.RecommendationService.one_click",
                 return_value=response,
             ):
@@ -100,6 +103,25 @@ class RecommendationJobsTest(unittest.TestCase):
             self.assertIn("任务已中断", job["message"])
             self.assertEqual(jobs[0]["status"], "failed")
             self.assertTrue(jobs[0]["finished_at"])
+
+    def test_missing_config_returns_blocked_without_failed_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, "config.toml")
+            db_path = os.path.join(tmpdir, "jobs.sqlite3")
+            with open(config_path, "w", encoding="utf-8") as file:
+                file.write(f'[database]\npath = "{db_path}"\n')
+
+            with patch.dict(os.environ, {"A_STOCK_CONFIG": config_path}), patch(
+                "app.services.recommendation_jobs.RecommendationService.readiness_errors",
+                return_value=["LLM 未配置"],
+            ):
+                submit_result = submit_one_click_recommendation_job(OneClickRecommendRequest(limit=1, include_search=False))
+                jobs = list_one_click_recommendation_jobs(limit=5)
+
+            self.assertFalse(submit_result["accepted"])
+            self.assertEqual(submit_result["status"], "blocked")
+            self.assertIn("LLM 未配置", submit_result["message"])
+            self.assertEqual(jobs, [])
 
 
 if __name__ == "__main__":

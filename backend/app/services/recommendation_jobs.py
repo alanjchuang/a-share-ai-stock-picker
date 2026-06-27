@@ -35,6 +35,18 @@ def submit_one_click_recommendation_job(payload: OneClickRecommendRequest) -> di
             conn = get_connection()
             _ensure_table(conn)
             _expire_stale_jobs(conn)
+            active_data_job = _active_data_job(conn)
+            if active_data_job:
+                return active_data_job
+            missing = RecommendationService(conn).readiness_errors(payload)
+            if missing:
+                return {
+                    "accepted": False,
+                    "job_id": None,
+                    "job_type": "one_click_recommendation",
+                    "status": "blocked",
+                    "message": "一键荐股需要先完成配置：" + "；".join(missing),
+                }
             job_id = _insert_job(conn, payload)
         finally:
             if conn:
@@ -127,6 +139,33 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_recommendation_jobs_status_started ON recommendation_jobs(status, started_at)")
     conn.commit()
+
+
+def _active_data_job(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """数据写任务运行时不启动荐股，避免因子缓存短暂不完整被记成失败历史。"""
+    try:
+        from app.services.background_jobs import get_active_job
+
+        active = get_active_job()
+    except Exception:
+        active = None
+    if not active:
+        return None
+
+    job_id = active.get("job_id")
+    job_type = str(active.get("job_type") or "data_refresh")
+    row = conn.execute("SELECT status, message FROM sync_jobs WHERE id = ?", (job_id,)).fetchone() if job_id else None
+    status = str(row["status"] if row else active.get("status") or "running")
+    if status not in {"queued", "running", "cancel_requested"}:
+        return None
+    message = str(row["message"] if row else active.get("message") or "")
+    return {
+        "accepted": False,
+        "job_id": int(job_id) if job_id else None,
+        "job_type": job_type,
+        "status": status,
+        "message": f"后台数据任务正在运行（{job_type}）：{message or '正在刷新缓存'}。请等数据任务完成后再一键荐股。",
+    }
 
 
 def _expire_stale_jobs(conn: sqlite3.Connection) -> None:

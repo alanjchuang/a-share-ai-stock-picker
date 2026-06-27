@@ -47,6 +47,7 @@ import type {
 } from '../types';
 import { runSafely } from '../utils/async';
 import { notifySuccess } from '../utils/feedback';
+import { formatLocalDateTime, parseBackendDateTime } from '../utils/time';
 
 const ratingColor: Record<string, string> = {
   A: 'green',
@@ -91,16 +92,26 @@ function workflowDescription(workflow: StockSelectionWorkflowResult): string {
 }
 
 function recommendationJobLabel(job: OneClickRecommendJob): string {
-  const time = job.finished_at || job.started_at || '';
+  const time = formatLocalDateTime(job.finished_at || job.started_at);
   const resultCount = job.result?.recommendations.length;
-  const statusText = job.status === 'success' ? `${resultCount ?? 0}只` : job.status;
-  return [time, statusText].filter(Boolean).join(' · ');
+  const statusText =
+    job.status === 'success'
+      ? `${resultCount ?? 0}只`
+      : job.status === 'failed' && job.message.includes('需要先完成配置')
+        ? '配置未完成'
+        : job.status === 'failed'
+          ? '失败'
+          : job.status === 'running'
+            ? '运行中'
+            : job.status;
+  const message = job.status === 'failed' && job.message ? ` · ${job.message.slice(0, 34)}${job.message.length > 34 ? '...' : ''}` : '';
+  return [time, statusText].filter(Boolean).join(' · ') + message;
 }
 
 function isFreshRunningRecommendationJob(job: OneClickRecommendJob): boolean {
   if (!['queued', 'running'].includes(job.status)) return false;
-  const timestamp = Date.parse((job.started_at || '').replace(' ', 'T'));
-  return Number.isFinite(timestamp) && Date.now() - timestamp < RUNNING_RECOMMENDATION_STALE_MS;
+  const timestamp = parseBackendDateTime(job.started_at)?.getTime();
+  return typeof timestamp === 'number' && Number.isFinite(timestamp) && Date.now() - timestamp < RUNNING_RECOMMENDATION_STALE_MS;
 }
 
 function normalizeRequest(values: Partial<ScreeningRequest>): ScreeningRequest {

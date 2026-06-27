@@ -60,7 +60,7 @@ class RecommendationService:
         search_context = self._search_context(payload, candidates) if payload.include_search else []
         return self._llm_recommend(payload, candidates, search_context)
 
-    def _validate_ready(self, payload: OneClickRecommendRequest) -> None:
+    def readiness_errors(self, payload: OneClickRecommendRequest) -> list[str]:
         missing: list[str] = []
         provider = self.settings.market_data.provider.lower()
         if provider == "demo":
@@ -75,6 +75,10 @@ class RecommendationService:
             missing.append("LLM 未配置，请在系统配置填写 Provider、API 地址、API Key 和模型名")
         if payload.include_search and not self.search.available:
             missing.append("火山搜索未配置，请在系统配置填写搜索 API Key，或关闭联网搜索")
+        return missing
+
+    def _validate_ready(self, payload: OneClickRecommendRequest) -> None:
+        missing = self.readiness_errors(payload)
         if missing:
             raise RuntimeError("一键荐股需要先完成配置：" + "；".join(missing))
 
