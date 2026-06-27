@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, ReloadOutlined, StarOutlined } from '@ant-design/icons';
-import { Button, Descriptions, Empty, List, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Empty, List, Space, Tag, Typography } from 'antd';
 import { PageContainer, ProCard, StatisticCard } from '@ant-design/pro-components';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
@@ -107,6 +107,12 @@ const StockDetail = () => {
     >
       {detail ? (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Alert
+            showIcon
+            type={detail.data_warnings.length ? 'warning' : 'info'}
+            message={`行情来源：${detail.data_source}`}
+            description={detail.data_warnings.length ? detail.data_warnings.join('；') : '行情、财务和因子均来自本地SQLite缓存；可在数据中心查看同步状态和缓存覆盖。'}
+          />
           <StatisticCard.Group>
             {metricCards.map((item) => (
               <StatisticCard key={item.title} statistic={item} />

@@ -7,8 +7,8 @@ cors_origins = ["http://127.0.0.1:5173", "http://localhost:5173"]
 path = "backend/data/stock_picker.sqlite3"
 
 [market_data]
-provider = "auto"
-fallback_to_demo = true
+provider = "akshare"
+fallback_to_demo = false
 clear_factor_cache_on_sync = true
 
 [akshare]
@@ -72,3 +72,4 @@ sentiment = 15
 [scheduler]
 enabled = true
 daily_sync_cron = "30 18 * * 1-5"
+factor_cache_refresh_minutes = 5

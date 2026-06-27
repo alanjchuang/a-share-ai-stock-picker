@@ -9,6 +9,7 @@ from typing import Any
 from app.db.database import get_connection
 from app.models.schemas import SyncRequest
 from app.services.factor_engine import FactorEngine
+from app.services.data_quality_service import DataQualityService
 from app.services.market_data_service import MarketDataService
 from app.services.sentiment_service import SentimentService
 
@@ -156,9 +157,10 @@ def run_exclusive_db_job_now(
 def _sync_task(payload: SyncRequest) -> JobTask:
     def task(conn: sqlite3.Connection) -> dict[str, Any]:
         sync_result = MarketDataService(conn).sync(payload)
+        quality_result = DataQualityService(conn).clean_mixed_demo_rows()
         sentiment_count = SentimentService(conn).batch_refresh_existing(limit=300)
         factor_rows = FactorEngine(conn).calculate_all(force=True)
-        return {"sync": sync_result, "sentiment_count": sentiment_count, "factor_count": len(factor_rows)}
+        return {"sync": sync_result, "quality": quality_result, "sentiment_count": sentiment_count, "factor_count": len(factor_rows)}
 
     return task
 

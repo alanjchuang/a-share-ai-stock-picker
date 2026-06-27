@@ -341,6 +341,8 @@ export interface StockDetail {
   news: StockNewsItem[];
   radar: Record<string, number>;
   rating: string;
+  data_source: string;
+  data_warnings: string[];
 }
 
 export interface StrategyOut {

@@ -4,6 +4,7 @@ import sqlite3
 from typing import Any
 
 from app.models.schemas import KLinePoint, StockDetail, StockMarketItem, StockMarketResponse, StockNewsItem
+from app.core.config import load_settings
 from app.services.data_repository import DataRepository
 from app.services.factor_engine import FactorEngine
 from app.services.screener_service import ScreenerService
@@ -71,7 +72,7 @@ class StockService:
             raise ValueError("股票不存在或尚未计算因子")
         base = ScreenerService._to_stock_score(row)
 
-        daily = self.repo.stock_daily_frame(ts_code, limit=120)
+        daily, data_warnings = self.repo.stock_daily_quality(ts_code, limit=120)
         tech = add_technical_indicators(daily)
         kline = [
             KLinePoint(
@@ -109,7 +110,15 @@ class StockService:
             "资金": base.capital_score,
             "舆情": base.sentiment_factor_score,
         }
-        return StockDetail(base=base, kline=kline, news=news, radar=radar, rating=base.rating)
+        settings = load_settings()
+        source = f"本地SQLite缓存 / {settings.market_data.provider}"
+        if settings.market_data.fallback_to_demo:
+            source += " / 允许DEMO兜底"
+        if not kline:
+            data_warnings.append("当前个股缺少可用K线，请在数据中心触发真实行情同步。")
+        elif len(kline) < 30:
+            data_warnings.append(f"当前仅有 {len(kline)} 条可信K线，部分均线和回测信号会偏弱；请在数据中心同步更多历史行情。")
+        return StockDetail(base=base, kline=kline, news=news, radar=radar, rating=base.rating, data_source=source, data_warnings=data_warnings)
 
     @staticmethod
     def _market_row_matches(

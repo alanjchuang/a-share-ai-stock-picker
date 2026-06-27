@@ -452,6 +452,8 @@ class StockDetail(BaseModel):
     news: list[StockNewsItem]
     radar: dict[str, float]
     rating: str
+    data_source: str = "本地SQLite缓存"
+    data_warnings: list[str] = Field(default_factory=list)
 
 
 class WatchlistGroupCreate(BaseModel):

@@ -7,6 +7,8 @@ from typing import Any
 
 import pandas as pd
 
+from app.utils.data_quality import sanitize_daily_frame
+
 
 class DataRepository:
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -80,13 +82,24 @@ class DataRepository:
     def read_factor_frame(self) -> pd.DataFrame:
         return pd.DataFrame(self.read_factor_rows())
 
-    def stock_daily_frame(self, ts_code: str, limit: int | None = None) -> pd.DataFrame:
+    def stock_daily_frame(self, ts_code: str, limit: int | None = None, clean: bool = True) -> pd.DataFrame:
         sql = "SELECT * FROM stock_daily WHERE ts_code = ? ORDER BY trade_date ASC"
         rows = self.conn.execute(sql, (ts_code,)).fetchall()
         data = [dict(row) for row in rows]
-        if limit:
-            data = data[-limit:]
-        return pd.DataFrame(data)
+        frame = pd.DataFrame(data)
+        if clean and not frame.empty:
+            frame = sanitize_daily_frame(frame).frame
+        if limit and not frame.empty:
+            frame = frame.tail(limit)
+        return frame.reset_index(drop=True)
+
+    def stock_daily_quality(self, ts_code: str, limit: int | None = None) -> tuple[pd.DataFrame, list[str]]:
+        sql = "SELECT * FROM stock_daily WHERE ts_code = ? ORDER BY trade_date ASC"
+        rows = self.conn.execute(sql, (ts_code,)).fetchall()
+        frame = pd.DataFrame([dict(row) for row in rows])
+        result = sanitize_daily_frame(frame)
+        cleaned = result.frame.tail(limit).reset_index(drop=True) if limit and not result.frame.empty else result.frame.reset_index(drop=True)
+        return cleaned, result.warnings
 
     def latest_fundamental(self, ts_code: str) -> dict[str, Any]:
         row = self.conn.execute(
