@@ -539,6 +539,18 @@ export interface WebSearchResponse {
   time_cost_ms?: number | null;
 }
 
+export interface MarketPromptRequest {
+  seed_query: string;
+  focus?: string | null;
+  count?: number;
+}
+
+export interface MarketPromptResponse {
+  prompts: string[];
+  reason: string;
+  source: 'llm';
+}
+
 export interface AppConfig {
   server: {
     host: string;

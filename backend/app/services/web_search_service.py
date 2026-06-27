@@ -57,12 +57,13 @@ class WebSearchService:
             result = raw.get("Result") if isinstance(raw.get("Result"), dict) else {}
             time_cost_ms += int(result.get("TimeCost") or 0)
             rag = result.get("Rag")
-            if isinstance(rag, str) and rag:
+            if search_type == "web_summary" and isinstance(rag, str) and rag:
                 rag_values.append(rag)
 
+            keep_summary = search_type == "web_summary"
             for item in result.get("WebResults") or []:
                 if isinstance(item, dict):
-                    parsed = self._web_item(query, item)
+                    parsed = self._web_item(query, item, keep_summary=keep_summary)
                     if parsed:
                         items.append(parsed)
             for item in result.get("ImageResults") or []:
@@ -76,13 +77,17 @@ class WebSearchService:
         if not items:
             raise RuntimeError("火山搜索未返回可用结果")
 
+        rag_text = "\n".join(rag_values) or None
+        if search_type == "web_summary" and not rag_text:
+            rag_text = self._source_brief(items)
+
         return WebSearchResponse(
             provider=self.config.model or "volc-search",
             search_type=search_type,
             queries=queries,
             total=len(items),
             items=items,
-            rag="\n".join(rag_values) or None,
+            rag=rag_text,
             request_ids=request_ids,
             time_cost_ms=time_cost_ms or None,
         )
@@ -109,9 +114,10 @@ class WebSearchService:
     def _post(self, query: str, count: int, search_type: str, request: WebSearchRequest, api_key: str) -> dict[str, Any]:
         need_summary = self.config.need_summary if request.need_summary is None else request.need_summary
         need_content = self.config.need_content if request.need_content is None else request.need_content
+        provider_search_type = "web" if search_type == "web_summary" else search_type
         payload: dict[str, Any] = {
             "Query": query,
-            "SearchType": search_type,
+            "SearchType": provider_search_type,
             "Count": count,
             "Filter": {
                 "NeedContent": bool(need_content),
@@ -244,7 +250,7 @@ class WebSearchService:
         return (os.getenv("VOLC_SEARCH_API_URL") or self.config.base_url or "").strip()
 
     @staticmethod
-    def _web_item(query: str, item: dict[str, Any]) -> WebSearchItem | None:
+    def _web_item(query: str, item: dict[str, Any], keep_summary: bool = True) -> WebSearchItem | None:
         title = str(item.get("Title") or "").strip()
         url = str(item.get("Url") or "").strip()
         summary = str(item.get("Summary") or "").strip()
@@ -252,6 +258,7 @@ class WebSearchService:
         content = str(item.get("Content") or "").strip()
         if not title and not (summary or snippet or content):
             return None
+        summary_text = _compact_text(summary or snippet or content, 360) if keep_summary else ""
         return WebSearchItem(
             type="web",
             query=query,
@@ -259,8 +266,8 @@ class WebSearchService:
             url=url,
             site_name=str(item.get("SiteName") or "").strip() or None,
             snippet=snippet,
-            summary=summary,
-            content=content,
+            summary=summary_text,
+            content="" if keep_summary else content,
             publish_time=str(item.get("PublishTime") or "").strip() or None,
             rank_score=_float_or_none(item.get("RankScore")),
         )
@@ -284,6 +291,17 @@ class WebSearchService:
             image_height=_int_or_none(image.get("Height")),
         )
 
+    @staticmethod
+    def _source_brief(items: list[WebSearchItem]) -> str | None:
+        if not items:
+            return None
+        lines = ["搜索源未返回单独RAG摘要，已按网页来源整理要点："]
+        for index, item in enumerate(items[:5], start=1):
+            text = _compact_text(item.summary or item.snippet or item.content, 180)
+            if text:
+                lines.append(f"{index}. {item.title}：{text}")
+        return "\n".join(lines) if len(lines) > 1 else None
+
 
 def _float_or_none(value: Any) -> float | None:
     try:
@@ -297,3 +315,10 @@ def _int_or_none(value: Any) -> int | None:
         return None if value is None or value == "" else int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _compact_text(text: str, limit: int) -> str:
+    compact = " ".join(str(text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit].rstrip() + "..."

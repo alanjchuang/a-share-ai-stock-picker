@@ -432,6 +432,18 @@ class WebSearchResponse(BaseModel):
     time_cost_ms: int | None = None
 
 
+class MarketPromptRequest(BaseModel):
+    seed_query: str = ""
+    focus: str | None = None
+    count: int = Field(default=6, ge=1, le=10)
+
+
+class MarketPromptResponse(BaseModel):
+    prompts: list[str]
+    reason: str = ""
+    source: Literal["llm"] = "llm"
+
+
 class OneClickRecommendRequest(BaseModel):
     risk_preference: Literal["conservative", "balanced", "aggressive"] = "balanced"
     limit: int = Field(default=8, ge=1, le=30)

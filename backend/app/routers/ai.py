@@ -4,6 +4,8 @@ from app.core.response import ApiResponse, ok
 from app.db.database import get_db
 from app.models.schemas import (
     NaturalLanguageRequest,
+    MarketPromptRequest,
+    MarketPromptResponse,
     NewsAnalyzeRequest,
     NewsSentiment,
     OneClickRecommendRequest,
@@ -14,6 +16,7 @@ from app.models.schemas import (
     WorkflowRunRequest,
 )
 from app.services.nl_parser import NaturalLanguageParser
+from app.services.market_prompt_service import MarketPromptService
 from app.services.recommendation_jobs import get_one_click_recommendation_job, submit_one_click_recommendation_job
 from app.services.sentiment_service import SentimentService
 from app.services.stock_selection_workflow import StockSelectionWorkflow
@@ -55,6 +58,11 @@ def one_click_recommend_job(job_id: int) -> ApiResponse[dict[str, object]]:
 @router.post("/search", response_model=ApiResponse[WebSearchResponse])
 def web_search(payload: WebSearchRequest) -> ApiResponse[WebSearchResponse]:
     return ok(WebSearchService().search(payload))
+
+
+.post("/market-prompts", response_model=ApiResponse[MarketPromptResponse])
+def market_prompts(payload: MarketPromptRequest) -> ApiResponse[MarketPromptResponse]:
+    return ok(MarketPromptService().generate(payload), "市场情报Prompt已生成")
 
 
 @router.post("/sentiment/analyze", response_model=ApiResponse[NewsSentiment])

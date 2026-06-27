@@ -6,6 +6,8 @@ import type {
   DataHealthResponse,
   DecisionDashboardResponse,
   IndexMeta,
+  MarketPromptRequest,
+  MarketPromptResponse,
   PatternRadarResponse,
   ScreeningRequest,
   ScreeningResult,
@@ -128,6 +130,7 @@ export const api = {
     }),
   listWorkflows: () => request<WorkflowInfo[]>({ url: '/ai/workflows', method: 'GET' }),
   searchWeb: (data: WebSearchRequest) => request<WebSearchResponse>({ url: '/ai/search', method: 'POST', data }),
+  generateMarketPrompts: (data: MarketPromptRequest) => request<MarketPromptResponse>({ url: '/ai/market-prompts', method: 'POST', data }),
   listStockMarket: (params: {
     q?: string;
     industry?: string;

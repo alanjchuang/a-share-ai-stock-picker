@@ -1,4 +1,4 @@
-import { GlobalOutlined, SaveOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { BulbOutlined, GlobalOutlined, SaveOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { Alert, Button, Input, List, Select, Space, Tag, Typography } from 'antd';
 import { PageContainer, ProCard, StatisticCard } from '@ant-design/pro-components';
 import { useEffect, useMemo, useState } from 'react';
@@ -32,14 +32,19 @@ const IntelligenceCenter = () => {
   const [searchType, setSearchType] = useState<SearchType>('web_summary');
   const [count, setCount] = useState(8);
   const [result, setResult] = useState<WebSearchResponse | null>(null);
+  const [promptOptions, setPromptOptions] = useState<string[]>([]);
+  const [promptReason, setPromptReason] = useState('');
+  const [promptLoading, setPromptLoading] = useState(false);
   const searchReady = Boolean(config?.search.enabled && config.search.api_key && config.search.base_url);
+  const llmReady = Boolean(config && config.llm.provider !== 'heuristic' && config.llm.api_base && config.llm.api_key && config.llm.model);
 
   const summaryText = useMemo(() => {
     if (!result) return '';
-    return result.items
+    const itemText = result.items
       .slice(0, 6)
-      .map((item, index) => `${index + 1}. ${item.title}\n${item.summary || item.snippet}`)
+      .map((item, index) => `${index + 1}. ${item.title}\n${item.summary || item.snippet || item.content}`)
       .join('\n\n');
+    return [result.rag ? `AI摘要\n${result.rag}` : '', itemText].filter(Boolean).join('\n\n');
   }, [result]);
 
   useEffect(() => {
@@ -54,15 +59,33 @@ const IntelligenceCenter = () => {
 
   async function search(): Promise<void> {
     if (!searchReady) return;
+    const useSummary = searchType === 'web_summary';
+    const useContent = searchType === 'web';
     setResult(
       await api.searchWeb({
         query,
         count,
         search_type: searchType,
-        need_summary: true,
-        need_content: false
+        need_summary: useSummary,
+        need_content: useContent
       })
     );
+  }
+
+  async function generatePrompts(): Promise<void> {
+    if (!llmReady) return;
+    setPromptLoading(true);
+    try {
+      const response = await api.generateMarketPrompts({ seed_query: query, count: 6 });
+      setPromptOptions(response.prompts);
+      setPromptReason(response.reason);
+      if (response.prompts[0]) {
+        setQuery(response.prompts[0]);
+      }
+      notifySuccess('AI已生成市场情报Prompt');
+    } finally {
+      setPromptLoading(false);
+    }
   }
 
   async function saveBriefing(): Promise<void> {
@@ -109,7 +132,35 @@ const IntelligenceCenter = () => {
               <Button type="primary" icon={<SearchOutlined />} disabled={!searchReady || !query.trim()} onClick={() => runSafely(search())}>
                 搜索
               </Button>
+              <Button icon={<BulbOutlined />} loading={promptLoading} disabled={!llmReady} onClick={() => runSafely(generatePrompts())}>
+                用AI生成市场情报Prompt
+              </Button>
             </Space.Compact>
+            {!llmReady ? (
+              <Alert
+                showIcon
+                type="warning"
+                message="LLM尚未配置，不能使用AI生成市场情报Prompt"
+                description="请在系统配置页填写 LLM Provider、API地址、API Key 和模型名；配置前不会用规则模板冒充AI结果。"
+                action={
+                  <Button size="small" type="primary" onClick={() => navigate('/config')}>
+                    去配置
+                  </Button>
+                }
+              />
+            ) : null}
+            {promptOptions.length ? (
+              <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                <Typography.Text type="secondary">{promptReason || '点击下方Prompt可直接填入搜索框。'}</Typography.Text>
+                <Space wrap>
+                  {promptOptions.map((item) => (
+                    <Tag.CheckableTag key={item} checked={item === query} onChange={() => setQuery(item)}>
+                      {item}
+                    </Tag.CheckableTag>
+                  ))}
+                </Space>
+              </Space>
+            ) : null}
             <Space wrap>
               <Select<SearchType>
                 value={searchType}
@@ -142,6 +193,15 @@ const IntelligenceCenter = () => {
           <StatisticCard statistic={{ title: 'Request IDs', value: result?.request_ids.length ?? 0 }} />
         </StatisticCard.Group>
         <ProCard title="情报结果" bordered>
+          {result?.rag && result.search_type === 'web_summary' ? (
+            <Alert
+              showIcon
+              type="success"
+              message="网页摘要"
+              description={<Typography.Paragraph style={{ marginBottom: 0 }} ellipsis={{ rows: 5, expandable: true }}>{result.rag}</Typography.Paragraph>}
+              style={{ marginBottom: 16 }}
+            />
+          ) : null}
           {result?.items.length ? (
             <List<WebSearchItem>
               className="intelligence-list"
@@ -164,7 +224,7 @@ const IntelligenceCenter = () => {
                     }
                     description={
                       <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                        <Typography.Paragraph ellipsis={{ rows: 2, expandable: true }}>{item.summary || item.snippet}</Typography.Paragraph>
+                        <Typography.Paragraph ellipsis={{ rows: 2, expandable: true }}>{item.summary || item.snippet || item.content}</Typography.Paragraph>
                         {item.content ? <Typography.Paragraph type="secondary" ellipsis={{ rows: 3, expandable: true }}>{item.content}</Typography.Paragraph> : null}
                       </Space>
                     }
