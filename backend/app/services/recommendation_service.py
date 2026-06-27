@@ -23,6 +23,18 @@ from app.services.screener_service import ScreenerService
 from app.services.web_search_service import WebSearchService
 
 
+CONFIDENCE_LABELS = {
+    "高": 85.0,
+    "较高": 80.0,
+    "中高": 75.0,
+    "中": 65.0,
+    "中等": 65.0,
+    "一般": 55.0,
+    "低": 40.0,
+    "较低": 35.0,
+}
+
+
 class RecommendationService:
     """一键研究推荐：融合本地因子、舆情和可选联网资料，输出观察建议。"""
 
@@ -155,7 +167,7 @@ recommendations: 数组，每项包含 ts_code,name,action,reason,risk,confidenc
                         action=str(raw.get("action") or "纳入观察"),
                         reason=str(raw.get("reason") or "多因子综合靠前"),
                         risk=str(raw.get("risk") or self._risk_for(row)),
-                        confidence=round(float(raw.get("confidence") or row.ai_score), 1),
+                        confidence=self._confidence_for(raw.get("confidence"), row.ai_score),
                         source="llm",
                         stock=row,
                     )
@@ -165,6 +177,29 @@ recommendations: 数组，每项包含 ts_code,name,action,reason,risk,confidenc
         if items:
             return items
         raise RuntimeError("LLM 未返回可用候选股，请检查模型配置、Workflow提示词或重试一键荐股。")
+
+    @staticmethod
+    def _confidence_for(value: Any, fallback: float) -> float:
+        if value is None or value == "":
+            return round(float(fallback), 1)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized in CONFIDENCE_LABELS:
+                return CONFIDENCE_LABELS[normalized]
+            if normalized.endswith("%"):
+                normalized = normalized[:-1].strip()
+            try:
+                number = float(normalized)
+            except ValueError:
+                return round(float(fallback), 1)
+        else:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return round(float(fallback), 1)
+        if 0 < number <= 1:
+            number *= 100
+        return round(max(0, min(number, 100)), 1)
 
     @staticmethod
     def _candidate_snapshot(row: Any) -> dict[str, object]:
