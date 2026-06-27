@@ -5,6 +5,7 @@ import type { ProColumns } from '@ant-design/pro-components';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/modules';
+import StockLlmAnalysisButton from '../components/StockLlmAnalysisButton';
 import type { Rating, StrategyDefinition, StrategyHit } from '../types';
 import { runSafely } from '../utils/async';
 import { notifySuccess } from '../utils/feedback';
@@ -94,12 +95,13 @@ const StrategyLab = () => {
     {
       title: '操作',
       valueType: 'option',
-      width: 136,
+      width: 190,
       fixed: 'right',
       render: (_, record) => [
         <Button key="detail" type="link" onClick={() => navigate(`/stock/${record.ts_code}`)}>
           详情
         </Button>,
+        <StockLlmAnalysisButton key="analysis" tsCode={record.ts_code} name={record.name} />,
         <Button key="add" type="link" icon={<PlusOutlined />} onClick={() => runSafely(addToWatchlist(record))}>
           自选
         </Button>
@@ -156,7 +158,7 @@ const StrategyLab = () => {
           options={false}
           columns={columns}
           dataSource={scan?.rows ?? []}
-          scroll={{ x: 1280 }}
+          scroll={{ x: 1340 }}
           pagination={{ pageSize: 12, showSizeChanger: true }}
           onRow={(record) => ({
             onDoubleClick: () => navigate(`/stock/${record.ts_code}`)

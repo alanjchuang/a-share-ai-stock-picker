@@ -17,6 +17,7 @@ import type {
   OneClickRecommendResponse,
   StockSelectionWorkflowResult,
   StockDetail,
+  StockLlmAnalysisResponse,
   StockMarketResponse,
   StrategyDefinition,
   StrategyScanResponse,
@@ -121,9 +122,9 @@ export const api = {
   runScreener: (data: ScreeningRequest) => request<ScreeningResult>({ url: '/screener/run', method: 'POST', data }),
   parseText: (text: string) => request<ScreeningRequest>({ url: '/ai/parse', method: 'POST', data: { text } }),
   oneClickRecommend: (data: { risk_preference: 'conservative' | 'balanced' | 'aggressive'; limit?: number; include_search?: boolean; focus_themes?: string[] }) =>
-    request<BackgroundJobResponse>({ url: '/ai/recommendations/one-click', method: 'POST', data }),
+    request<BackgroundJobResponse>({ url: '/ai/recommendations/one-click', method: 'POST', data, skipGlobalLoading: true }),
   getOneClickRecommendJob: (jobId: number) =>
-    request<OneClickRecommendJob>({ url: `/ai/recommendations/one-click/jobs/${jobId}`, method: 'GET' }),
+    request<OneClickRecommendJob>({ url: `/ai/recommendations/one-click/jobs/${jobId}`, method: 'GET', skipGlobalLoading: true }),
   runSelectionWorkflow: (text: string, workflowPath?: string) =>
     request<StockSelectionWorkflowResult>({
       url: '/ai/stock-selection-workflow',
@@ -145,6 +146,8 @@ export const api = {
     sort_order?: 'asc' | 'desc';
   }) => request<StockMarketResponse>({ url: '/stocks', method: 'GET', params }),
   getStockDetail: (tsCode: string) => request<StockDetail>({ url: `/stocks/${encodeURIComponent(tsCode)}`, method: 'GET' }),
+  analyzeStock: (tsCode: string) =>
+    request<StockLlmAnalysisResponse>({ url: `/stocks/${encodeURIComponent(tsCode)}/llm-analysis`, method: 'POST', skipGlobalLoading: true }),
   syncStockHistory: (tsCode: string) =>
     request<BackgroundJobResponse>({ url: `/stocks/${encodeURIComponent(tsCode)}/history/sync`, method: 'POST' }),
   listEtfs: (params: {

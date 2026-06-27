@@ -7,6 +7,7 @@ import type { EChartsOption } from 'echarts';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/modules';
+import StockLlmAnalysisButton from '../components/StockLlmAnalysisButton';
 import type { DecisionDashboardResponse, IndustryHeatItem, Rating, StockScore } from '../types';
 import { runSafely } from '../utils/async';
 
@@ -96,6 +97,12 @@ const DecisionDashboard = () => {
       dataIndex: 'ai_score',
       width: 92,
       render: (_, record) => <Tag color={ratingColor[record.rating]} className="score-badge">{record.rating} {record.ai_score.toFixed(1)}</Tag>
+    },
+    {
+      title: '操作',
+      valueType: 'option',
+      width: 86,
+      render: (_, record) => <StockLlmAnalysisButton tsCode={record.ts_code} name={record.name} />
     }
   ];
 

@@ -415,6 +415,18 @@ export interface StockDetail {
   data_warnings: string[];
 }
 
+export interface StockLlmAnalysisResponse {
+  ts_code: string;
+  name: string;
+  source: 'llm' | 'fallback';
+  summary: string;
+  key_points: string[];
+  risks: string[];
+  watch_items: string[];
+  questions: string[];
+  disclaimer: string;
+}
+
 export interface StrategyOut {
   id: number;
   name: string;

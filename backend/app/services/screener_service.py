@@ -9,6 +9,8 @@ from app.core.config import load_settings
 from app.models.schemas import RangeFilter, ScreeningDiagnostics, ScreeningRequest, ScreeningResult, StockScore
 from app.services.data_repository import DataRepository
 from app.services.factor_engine import FactorEngine
+from app.utils.indicators import safe_float
+from app.utils.number_parsing import coerce_score
 
 
 class ScreenerService:
@@ -51,7 +53,7 @@ class ScreenerService:
         else:
             matched = base_filtered
 
-        matched.sort(key=lambda item: float(item.get("ai_score") or 0), reverse=True)
+        matched.sort(key=lambda item: self._score(item.get("ai_score"), 0), reverse=True)
         limited = matched[: request.limit]
         stock_rows = [self._to_stock_score(row) for row in limited]
         stock_count = self.conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
@@ -100,7 +102,7 @@ class ScreenerService:
         if options["exclude_paused"] and int(row.get("is_paused") or 0):
             return False, "停牌"
         min_market_cap = options["min_market_cap"]
-        if min_market_cap and float(row.get("total_mv") or 0) < min_market_cap:
+        if min_market_cap and self._number(row.get("total_mv")) < min_market_cap:
             return False, "低于最小市值"
         new_stock_days = options["new_stock_days"]
         if new_stock_days:
@@ -182,14 +184,14 @@ class ScreenerService:
                 conditions.append(lambda row, f=field, rf=range_filter: self._in_range(row.get(f), rf))
         if request.fundamental.industry_percentile_top is not None:
             threshold = request.fundamental.industry_percentile_top
-            conditions.append(lambda row: float(row.get("fundamental_score") or 0) >= threshold)
+            conditions.append(lambda row: self._score(row.get("fundamental_score"), 0) >= threshold)
         return conditions
 
     def _technical_conditions(self, request: ScreeningRequest) -> list[Callable[[dict[str, Any]], bool]]:
         conditions: list[Callable[[dict[str, Any]], bool]] = []
         if request.technical.above_ma:
             conditions.append(
-                lambda row: all(float(row.get("close") or 0) >= float(row.get(f"ma{window}") or 10**12) for window in request.technical.above_ma)
+                lambda row: all(self._number(row.get("close")) >= self._number(row.get(f"ma{window}"), 10**12) for window in request.technical.above_ma)
             )
         if request.technical.macd_cross:
             conditions.append(lambda row: row.get("macd_cross") == request.technical.macd_cross)
@@ -222,7 +224,7 @@ class ScreenerService:
         for request_field, row_field in mapping.items():
             value = getattr(request.capital, request_field)
             if value is not None:
-                conditions.append(lambda row, f=row_field, min_value=value: float(row.get(f) or 0) >= min_value)
+                conditions.append(lambda row, f=row_field, min_value=value: self._number(row.get(f)) >= min_value)
         return conditions
 
     def _sentiment_condition(self, request: ScreeningRequest) -> Callable[[dict[str, Any]], bool] | None:
@@ -240,7 +242,7 @@ class ScreenerService:
 
         def condition(row: dict[str, Any]) -> bool:
             score_field = "sentiment_score_15" if request.sentiment.days > 7 else "sentiment_score"
-            if request.sentiment.min_avg_score is not None and float(row.get(score_field) or 50) < request.sentiment.min_avg_score:
+            if request.sentiment.min_avg_score is not None and self._score(row.get(score_field), 50) < request.sentiment.min_avg_score:
                 return False
             if request.sentiment.include_labels and str(row.get("sentiment_label")) not in request.sentiment.include_labels:
                 return False
@@ -249,7 +251,7 @@ class ScreenerService:
                 return False
             if request.sentiment.blacklist_keywords and any(keyword in text for keyword in request.sentiment.blacklist_keywords):
                 return False
-            if request.sentiment.max_negative_ratio is not None and float(row.get("negative_news_ratio") or 0) > request.sentiment.max_negative_ratio:
+            if request.sentiment.max_negative_ratio is not None and self._number(row.get("negative_news_ratio")) > request.sentiment.max_negative_ratio:
                 return False
             return True
 
@@ -257,7 +259,7 @@ class ScreenerService:
 
     @staticmethod
     def _in_range(value: Any, range_filter: RangeFilter) -> bool:
-        number = float(value or 0)
+        number = ScreenerService._number(value)
         if range_filter.min is not None and number < range_filter.min:
             return False
         if range_filter.max is not None and number > range_filter.max:
@@ -294,21 +296,36 @@ class ScreenerService:
             name=str(row.get("name") or row["ts_code"]),
             industry=row.get("industry"),
             index_names=row.get("index_names") or [],
-            close=row.get("close"),
-            pct_chg=row.get("pct_chg"),
-            pe_ttm=row.get("pe_ttm"),
-            pb=row.get("pb"),
-            roe=row.get("roe"),
-            revenue_yoy=row.get("revenue_yoy"),
-            circ_mv=row.get("circ_mv"),
-            main_net_inflow=row.get("main_net_inflow_sum"),
-            sentiment_score=float(row.get("sentiment_score") or 50),
+            close=ScreenerService._optional_number(row.get("close")),
+            pct_chg=ScreenerService._optional_number(row.get("pct_chg")),
+            pe_ttm=ScreenerService._optional_number(row.get("pe_ttm")),
+            pb=ScreenerService._optional_number(row.get("pb")),
+            roe=ScreenerService._optional_number(row.get("roe")),
+            revenue_yoy=ScreenerService._optional_number(row.get("revenue_yoy")),
+            circ_mv=ScreenerService._optional_number(row.get("circ_mv")),
+            main_net_inflow=ScreenerService._optional_number(row.get("main_net_inflow_sum")),
+            sentiment_score=ScreenerService._score(row.get("sentiment_score"), 50),
             sentiment_label=str(row.get("sentiment_label") or "中性"),
-            fundamental_score=float(row.get("fundamental_score") or 0),
-            technical_score=float(row.get("technical_score") or 0),
-            capital_score=float(row.get("capital_score") or 0),
-            sentiment_factor_score=float(row.get("sentiment_factor_score") or 0),
-            ai_score=float(row.get("ai_score") or 0),
+            fundamental_score=ScreenerService._score(row.get("fundamental_score"), 0),
+            technical_score=ScreenerService._score(row.get("technical_score"), 0),
+            capital_score=ScreenerService._score(row.get("capital_score"), 0),
+            sentiment_factor_score=ScreenerService._score(row.get("sentiment_factor_score"), 0),
+            ai_score=ScreenerService._score(row.get("ai_score"), 0),
             rating=row.get("rating") if row.get("rating") in {"A", "B", "C", "D"} else "C",
             metrics=metrics,
         )
+
+    @staticmethod
+    def _number(value: Any, default: float = 0.0) -> float:
+        return safe_float(value, default)
+
+    @staticmethod
+    def _optional_number(value: Any) -> float | None:
+        if value is None or value == "":
+            return None
+        number = safe_float(value, default=float("nan"))
+        return None if number != number else number
+
+    @staticmethod
+    def _score(value: Any, default: float = 0.0) -> float:
+        return coerce_score(value, default=default)

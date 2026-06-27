@@ -29,6 +29,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from '@e965/xlsx';
 import FactorCharts from '../components/FactorCharts';
+import StockLlmAnalysisButton from '../components/StockLlmAnalysisButton';
 import { api, defaultScreeningRequest } from '../api/modules';
 import { useAppStore } from '../store/useAppStore';
 import type {
@@ -255,13 +256,14 @@ const Workbench = () => {
     {
       title: '操作',
       valueType: 'option',
-      width: 96,
+      width: 150,
       fixed: 'right',
-      render: (_, record) => (
-        <Button type="link" size="small" icon={<StarOutlined />} onClick={(event) => runSafely(addToWatchlist(record, event))}>
+      render: (_, record) => [
+        <StockLlmAnalysisButton key="analysis" tsCode={record.ts_code} name={record.name} />,
+        <Button key="add" type="link" size="small" icon={<StarOutlined />} onClick={(event) => runSafely(addToWatchlist(record, event))}>
           自选
         </Button>
-      )
+      ]
     }
   ];
 
@@ -646,6 +648,7 @@ const Workbench = () => {
                       <Button type="link" onClick={() => navigate(`/stock/${item.ts_code}`)}>
                         {item.name} · {item.ts_code}
                       </Button>
+                      <StockLlmAnalysisButton tsCode={item.ts_code} name={item.name} />
                       <Tag color={ratingColor[item.rating] ?? 'default'}>{item.rating} {item.ai_score.toFixed(1)}</Tag>
                       <Tag color={item.source === 'llm' ? 'blue' : 'default'}>{item.source === 'llm' ? 'LLM' : '规则'}</Tag>
                       <Typography.Text strong>{item.action}</Typography.Text>
@@ -676,7 +679,7 @@ const Workbench = () => {
           options={false}
           columns={columns}
           dataSource={result?.rows ?? []}
-          scroll={{ x: 1250 }}
+          scroll={{ x: 1320 }}
           pagination={{ pageSize: 10, showSizeChanger: true }}
           rowSelection={{}}
           onRow={(record) => ({

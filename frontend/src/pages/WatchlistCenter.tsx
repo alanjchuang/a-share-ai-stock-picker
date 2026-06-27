@@ -5,6 +5,7 @@ import type { ProColumns } from '@ant-design/pro-components';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/modules';
+import StockLlmAnalysisButton from '../components/StockLlmAnalysisButton';
 import type { WatchlistAskResponse, WatchlistGroup, WatchlistItem } from '../types';
 import { runSafely } from '../utils/async';
 import { notifySuccess } from '../utils/feedback';
@@ -111,8 +112,9 @@ const WatchlistCenter = () => {
     {
       title: '操作',
       valueType: 'option',
-      width: 156,
+      width: 212,
       render: (_, record) => [
+        <StockLlmAnalysisButton key="analysis" tsCode={record.ts_code} name={record.stock?.name ?? record.ts_code} />,
         <Button key="edit" type="link" icon={<EditOutlined />} onClick={() => openEdit(record)}>
           编辑
         </Button>,
@@ -252,7 +254,7 @@ const WatchlistCenter = () => {
           options={false}
           columns={columns}
           dataSource={items}
-          scroll={{ x: 1320 }}
+          scroll={{ x: 1380 }}
           pagination={{ pageSize: 10, showSizeChanger: true }}
         />
       </Space>

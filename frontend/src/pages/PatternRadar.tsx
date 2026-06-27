@@ -7,6 +7,7 @@ import type { EChartsOption } from 'echarts';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/modules';
+import StockLlmAnalysisButton from '../components/StockLlmAnalysisButton';
 import type { KlinePatternHit, PatternRadarResponse, Rating } from '../types';
 import { runSafely } from '../utils/async';
 
@@ -80,13 +81,14 @@ const PatternRadar = () => {
     {
       title: '操作',
       valueType: 'option',
-      width: 80,
+      width: 136,
       fixed: 'right',
-      render: (_, record) => (
-        <Button type="link" onClick={() => navigate(`/stock/${record.ts_code}`)}>
+      render: (_, record) => [
+        <Button key="detail" type="link" onClick={() => navigate(`/stock/${record.ts_code}`)}>
           详情
-        </Button>
-      )
+        </Button>,
+        <StockLlmAnalysisButton key="analysis" tsCode={record.ts_code} name={record.name} />
+      ]
     }
   ];
 
@@ -132,7 +134,7 @@ const PatternRadar = () => {
           options={false}
           columns={columns}
           dataSource={data?.rows ?? []}
-          scroll={{ x: 1180 }}
+          scroll={{ x: 1240 }}
           pagination={{ pageSize: 12, showSizeChanger: true }}
           onRow={(record) => ({
             onDoubleClick: () => navigate(`/stock/${record.ts_code}`)

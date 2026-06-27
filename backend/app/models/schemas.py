@@ -632,6 +632,18 @@ class StockDetail(BaseModel):
     data_warnings: list[str] = Field(default_factory=list)
 
 
+class StockLlmAnalysisResponse(BaseModel):
+    ts_code: str
+    name: str
+    source: Literal["llm", "fallback"] = "fallback"
+    summary: str
+    key_points: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    watch_items: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list)
+    disclaimer: str = "本功能仅基于公开数据做统计研究，不构成任何投资建议。"
+
+
 class WatchlistGroupCreate(BaseModel):
     name: str
     description: str = ""

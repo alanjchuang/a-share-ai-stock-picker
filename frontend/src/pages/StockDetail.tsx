@@ -7,6 +7,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/modules';
+import StockLlmAnalysisButton from '../components/StockLlmAnalysisButton';
 import type { FinancialSnapshot, StockDetail as StockDetailType } from '../types';
 import { runSafely } from '../utils/async';
 import { notifySuccess } from '../utils/feedback';
@@ -155,6 +156,7 @@ const StockDetail = () => {
         <Button key="refresh" icon={<ReloadOutlined />} onClick={load}>
           刷新
         </Button>,
+        <StockLlmAnalysisButton key="analysis" tsCode={detail?.base.ts_code ?? tsCode} name={detail?.base.name} buttonType="default" size="middle" label="LLM解析" />,
         <Button key="watch" type="primary" icon={<StarOutlined />} onClick={() => runSafely(addToWatchlist())} disabled={!detail}>
           加入自选
         </Button>
