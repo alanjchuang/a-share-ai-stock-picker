@@ -3,6 +3,7 @@ import AppLayout from '../layout/AppLayout';
 import StockDetail from '../pages/StockDetail';
 import StrategyManager from '../pages/StrategyManager';
 import SystemConfig from '../pages/SystemConfig';
+import WatchlistCenter from '../pages/WatchlistCenter';
 import Workbench from '../pages/Workbench';
 
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
@@ -35,6 +36,14 @@ const AppRouter = () => (
         element={
           <ProtectedRoute>
             <StrategyManager />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/watchlist"
+        element={
+          <ProtectedRoute>
+            <WatchlistCenter />
           </ProtectedRoute>
         }
       />

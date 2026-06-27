@@ -132,6 +132,47 @@ CREATE TABLE IF NOT EXISTS strategies (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS watchlist_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT DEFAULT '',
+    color TEXT DEFAULT 'blue',
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS watchlist_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    ts_code TEXT NOT NULL,
+    reason TEXT DEFAULT '',
+    tags TEXT DEFAULT '',
+    priority INTEGER DEFAULT 3,
+    risk_level TEXT DEFAULT 'medium',
+    status TEXT DEFAULT 'active',
+    cost_price REAL,
+    target_price REAL,
+    stop_loss_price REAL,
+    review_interval_days INTEGER DEFAULT 7,
+    next_review_date TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(group_id, ts_code),
+    FOREIGN KEY(group_id) REFERENCES watchlist_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY(ts_code) REFERENCES stocks(ts_code) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS watchlist_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER,
+    note_type TEXT NOT NULL DEFAULT 'manual',
+    content TEXT NOT NULL,
+    ai_payload_json TEXT DEFAULT '',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(item_id) REFERENCES watchlist_items(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS sync_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_type TEXT NOT NULL,

@@ -224,6 +224,72 @@ export interface StockSelectionWorkflowResult {
   steps: WorkflowStepTrace[];
 }
 
+export interface WatchlistGroup {
+  id: number;
+  name: string;
+  description: string;
+  color: string;
+  sort_order: number;
+  item_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WatchlistItem {
+  id: number;
+  group_id: number;
+  group_name: string;
+  ts_code: string;
+  reason: string;
+  tags: string[];
+  priority: number;
+  risk_level: 'low' | 'medium' | 'high' | string;
+  status: 'active' | 'paused' | 'closed' | string;
+  cost_price?: number | null;
+  target_price?: number | null;
+  stop_loss_price?: number | null;
+  review_interval_days: number;
+  next_review_date?: string | null;
+  created_at: string;
+  updated_at: string;
+  stock?: StockScore | null;
+}
+
+export interface WatchlistItemCreate {
+  ts_code: string;
+  group_id?: number | null;
+  group_name?: string | null;
+  reason?: string;
+  tags?: string[];
+  priority?: number;
+  risk_level?: 'low' | 'medium' | 'high';
+  status?: 'active' | 'paused' | 'closed';
+  cost_price?: number | null;
+  target_price?: number | null;
+  stop_loss_price?: number | null;
+  review_interval_days?: number;
+  next_review_date?: string | null;
+}
+
+export interface WatchlistAskResponse {
+  answer: string;
+  action_items: string[];
+  risk_notes: string[];
+  review_questions: string[];
+  focus_symbols: string[];
+  source: 'llm' | 'fallback';
+  snapshot: Array<Record<string, unknown>>;
+}
+
+export interface WatchlistNote {
+  id: number;
+  item_id?: number | null;
+  note_type: string;
+  content: string;
+  ai_payload: Record<string, unknown>;
+  created_at: string;
+}
+
 export type SearchType = 'web' | 'image' | 'web_summary';
 
 export interface WebSearchRequest {

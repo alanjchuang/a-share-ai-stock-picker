@@ -272,6 +272,113 @@ class StockDetail(BaseModel):
     rating: str
 
 
+class WatchlistGroupCreate(BaseModel):
+    name: str
+    description: str = ""
+    color: str = "blue"
+    sort_order: int = 0
+
+
+class WatchlistGroupUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    color: str | None = None
+    sort_order: int | None = None
+
+
+class WatchlistGroupOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    color: str
+    sort_order: int
+    item_count: int = 0
+    created_at: str
+    updated_at: str
+
+
+class WatchlistItemCreate(BaseModel):
+    ts_code: str
+    group_id: int | None = None
+    group_name: str | None = None
+    reason: str = ""
+    tags: list[str] = Field(default_factory=list)
+    priority: int = Field(default=3, ge=1, le=5)
+    risk_level: Literal["low", "medium", "high"] = "medium"
+    status: Literal["active", "paused", "closed"] = "active"
+    cost_price: float | None = None
+    target_price: float | None = None
+    stop_loss_price: float | None = None
+    review_interval_days: int = Field(default=7, ge=1, le=365)
+    next_review_date: str | None = None
+
+
+class WatchlistItemUpdate(BaseModel):
+    group_id: int | None = None
+    reason: str | None = None
+    tags: list[str] | None = None
+    priority: int | None = Field(default=None, ge=1, le=5)
+    risk_level: Literal["low", "medium", "high"] | None = None
+    status: Literal["active", "paused", "closed"] | None = None
+    cost_price: float | None = None
+    target_price: float | None = None
+    stop_loss_price: float | None = None
+    review_interval_days: int | None = Field(default=None, ge=1, le=365)
+    next_review_date: str | None = None
+
+
+class WatchlistItemOut(BaseModel):
+    id: int
+    group_id: int
+    group_name: str
+    ts_code: str
+    reason: str
+    tags: list[str]
+    priority: int
+    risk_level: str
+    status: str
+    cost_price: float | None = None
+    target_price: float | None = None
+    stop_loss_price: float | None = None
+    review_interval_days: int
+    next_review_date: str | None = None
+    created_at: str
+    updated_at: str
+    stock: StockScore | None = None
+
+
+class WatchlistNoteCreate(BaseModel):
+    item_id: int | None = None
+    note_type: Literal["manual", "review", "ai_review"] = "manual"
+    content: str
+
+
+class WatchlistNoteOut(BaseModel):
+    id: int
+    item_id: int | None = None
+    note_type: str
+    content: str
+    ai_payload: dict[str, object] = Field(default_factory=dict)
+    created_at: str
+
+
+class WatchlistAskRequest(BaseModel):
+    question: str
+    group_id: int | None = None
+    item_id: int | None = None
+    include_search: bool = True
+
+
+class WatchlistAskResponse(BaseModel):
+    answer: str
+    action_items: list[str] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
+    review_questions: list[str] = Field(default_factory=list)
+    focus_symbols: list[str] = Field(default_factory=list)
+    source: Literal["llm", "fallback"] = "fallback"
+    snapshot: list[dict[str, object]] = Field(default_factory=list)
+
+
 class SyncRequest(BaseModel):
     provider: Literal["auto", "akshare", "tushare", "demo"] | None = None
     trade_date: str | None = None

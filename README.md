@@ -113,6 +113,7 @@ candidate_limit = 20
 
 - 选股工作台：左侧多条件筛选，顶部自然语言输入，结果表格、Excel 导出、K线、因子雷达、行业分布、舆情直方图
 - 个股详情：基础信息、关键财务指标、120 日 K 线、新闻列表、LLM 舆情标签、四维度因子雷达、AI 评级
+- 自选股复盘：分组维护自选股，记录关注理由、标签、风险级别、复盘日期，并可快速询问自选池的风险、跟踪重点和复盘问题
 - 策略管理：保存、编辑、删除、执行策略，展示策略选股数量、平均得分、平均涨幅对比
 - 系统配置：数据源选择、AKShare/Tushare 参数、LLM API、火山搜索 API、全局过滤规则、评分权重、调度配置、缓存重算
 
@@ -140,6 +141,12 @@ candidate_limit = 20
 - `POST /api/ai/search`
 - `POST /api/ai/stock-selection-workflow`
 - `POST /api/ai/sentiment/analyze`
+- `GET /api/watchlists/groups`
+- `GET /api/watchlists/items`
+- `POST /api/watchlists/items`
+- `PUT /api/watchlists/items/{id}`
+- `DELETE /api/watchlists/items/{id}`
+- `POST /api/watchlists/ask`
 - `GET /api/stocks/{ts_code}`
 - `GET /api/strategies`
 - `POST /api/strategies`

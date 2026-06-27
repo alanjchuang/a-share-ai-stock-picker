@@ -4,6 +4,7 @@ import {
   ReloadOutlined,
   RobotOutlined,
   SaveOutlined,
+  StarOutlined,
   SyncOutlined
 } from '@ant-design/icons';
 import {
@@ -22,7 +23,7 @@ import {
 } from 'antd';
 import { ProCard, ProForm, ProFormDigit, ProFormSelect, ProFormTextArea, ProTable, StatisticCard } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import FactorCharts from '../components/FactorCharts';
@@ -148,6 +149,17 @@ const Workbench = () => {
       sorter: (a, b) => a.ai_score - b.ai_score,
       defaultSortOrder: 'descend',
       render: (_, record) => <Tag className="score-badge" color={ratingColor[record.rating]}>{record.rating} {record.ai_score.toFixed(1)}</Tag>
+    },
+    {
+      title: '操作',
+      valueType: 'option',
+      width: 96,
+      fixed: 'right',
+      render: (_, record) => (
+        <Button type="link" size="small" icon={<StarOutlined />} onClick={(event) => void addToWatchlist(record, event)}>
+          自选
+        </Button>
+      )
     }
   ];
 
@@ -217,6 +229,19 @@ const Workbench = () => {
     });
     setSaveOpen(false);
     message.success('策略已保存');
+  }
+
+  async function addToWatchlist(record: StockScore, event?: MouseEvent<HTMLElement>): Promise<void> {
+    event?.stopPropagation();
+    await api.addWatchlistItem({
+      ts_code: record.ts_code,
+      group_name: '观察池',
+      reason: `来自选股工作台：AI评分${record.ai_score.toFixed(1)}，评级${record.rating}`,
+      tags: [record.industry ?? '未分类'].filter(Boolean),
+      priority: record.rating === 'A' ? 5 : record.rating === 'B' ? 4 : 3,
+      risk_level: record.sentiment_score < 45 ? 'high' : 'medium'
+    });
+    message.success(`${record.name} 已加入自选股`);
   }
 
   return (

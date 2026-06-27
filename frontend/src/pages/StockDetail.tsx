@@ -1,5 +1,5 @@
-import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Button, Descriptions, Empty, List, Space, Tag, Typography } from 'antd';
+import { ArrowLeftOutlined, ReloadOutlined, StarOutlined } from '@ant-design/icons';
+import { Button, Descriptions, Empty, List, Space, Tag, Typography, message } from 'antd';
 import { PageContainer, ProCard, StatisticCard } from '@ant-design/pro-components';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
@@ -73,6 +73,19 @@ const StockDetail = () => {
     ];
   }, [detail]);
 
+  async function addToWatchlist(): Promise<void> {
+    if (!detail) return;
+    await api.addWatchlistItem({
+      ts_code: detail.base.ts_code,
+      group_name: '观察池',
+      reason: `来自个股详情：AI评分${detail.base.ai_score.toFixed(1)}，评级${detail.base.rating}`,
+      tags: [detail.base.industry ?? '未分类'].filter(Boolean),
+      priority: detail.base.rating === 'A' ? 5 : detail.base.rating === 'B' ? 4 : 3,
+      risk_level: detail.base.sentiment_score < 45 ? 'high' : 'medium'
+    });
+    message.success(`${detail.base.name} 已加入自选股`);
+  }
+
   if (!tsCode) return <Empty description="请从工作台选择一只股票" />;
 
   return (
@@ -84,6 +97,9 @@ const StockDetail = () => {
         </Button>,
         <Button key="refresh" icon={<ReloadOutlined />} onClick={load}>
           刷新
+        </Button>,
+        <Button key="watch" type="primary" icon={<StarOutlined />} onClick={() => void addToWatchlist()} disabled={!detail}>
+          加入自选
         </Button>
       ]}
     >

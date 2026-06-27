@@ -4,6 +4,7 @@ import {
   DatabaseOutlined,
   MoonOutlined,
   SettingOutlined,
+  StarOutlined,
   StockOutlined,
   SunOutlined
 } from '@ant-design/icons';
@@ -44,6 +45,7 @@ const AppLayout = () => {
             onClick={(item) => navigate(item.key)}
             items={[
               { key: '/', icon: <AreaChartOutlined />, label: '选股工作台' },
+              { key: '/watchlist', icon: <StarOutlined />, label: '自选股复盘' },
               { key: '/strategies', icon: <BarChartOutlined />, label: '策略管理' },
               { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
               { key: '/stock', icon: <DatabaseOutlined />, label: '个股详情' }

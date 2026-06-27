@@ -9,6 +9,11 @@ import type {
   StrategyOut,
   WebSearchRequest,
   WebSearchResponse,
+  WatchlistAskResponse,
+  WatchlistGroup,
+  WatchlistItem,
+  WatchlistItemCreate,
+  WatchlistNote,
   WorkflowInfo
 } from '../types';
 
@@ -111,5 +116,19 @@ export const api = {
       method: 'POST',
       data: { provider, sync_news: true, sync_fundamentals: true, sync_indices: true }
     }),
-  calculateFactors: () => request<{ count: number }>({ url: '/factors/calculate', method: 'POST' })
+  calculateFactors: () => request<{ count: number }>({ url: '/factors/calculate', method: 'POST' }),
+  listWatchlistGroups: () => request<WatchlistGroup[]>({ url: '/watchlists/groups', method: 'GET' }),
+  createWatchlistGroup: (data: { name: string; description?: string; color?: string; sort_order?: number }) =>
+    request<WatchlistGroup>({ url: '/watchlists/groups', method: 'POST', data }),
+  listWatchlistItems: (params?: { group_id?: number; status?: string }) =>
+    request<WatchlistItem[]>({ url: '/watchlists/items', method: 'GET', params }),
+  addWatchlistItem: (data: WatchlistItemCreate) => request<WatchlistItem>({ url: '/watchlists/items', method: 'POST', data }),
+  updateWatchlistItem: (id: number, data: Partial<WatchlistItemCreate>) =>
+    request<WatchlistItem>({ url: `/watchlists/items/${id}`, method: 'PUT', data }),
+  deleteWatchlistItem: (id: number) => request<{ deleted: number }>({ url: `/watchlists/items/${id}`, method: 'DELETE' }),
+  askWatchlist: (data: { question: string; group_id?: number | null; item_id?: number | null; include_search?: boolean }) =>
+    request<WatchlistAskResponse>({ url: '/watchlists/ask', method: 'POST', data }),
+  listWatchlistNotes: (itemId?: number) => request<WatchlistNote[]>({ url: '/watchlists/notes', method: 'GET', params: { item_id: itemId } }),
+  createWatchlistNote: (data: { item_id?: number | null; note_type?: string; content: string }) =>
+    request<WatchlistNote>({ url: '/watchlists/notes', method: 'POST', data })
 };
