@@ -1,0 +1,338 @@
+export type LogicMode = 'and' | 'or';
+export type Rating = 'A' | 'B' | 'C' | 'D';
+export type CrossSignal = 'golden' | 'dead';
+export type ThemeMode = 'light' | 'dark';
+
+export interface ApiResponse<T> {
+  code: number;
+  message: string;
+  data: T;
+}
+
+export interface RangeFilter {
+  min?: number | null;
+  max?: number | null;
+}
+
+export interface IndexConditions {
+  index_codes: string[];
+  require_member: boolean;
+  excess_return_days?: number | null;
+  min_excess_return?: number | null;
+  max_pe_percentile?: number | null;
+  max_pb_percentile?: number | null;
+  track_momentum_top_n?: number | null;
+}
+
+export interface FundamentalConditions {
+  pe_ttm?: RangeFilter | null;
+  pb?: RangeFilter | null;
+  peg?: RangeFilter | null;
+  roe?: RangeFilter | null;
+  gross_margin?: RangeFilter | null;
+  netprofit_margin?: RangeFilter | null;
+  revenue_yoy?: RangeFilter | null;
+  deduct_profit_yoy?: RangeFilter | null;
+  debt_to_assets?: RangeFilter | null;
+  dividend_yield?: RangeFilter | null;
+  total_mv?: RangeFilter | null;
+  circ_mv?: RangeFilter | null;
+  goodwill_ratio?: RangeFilter | null;
+  industry_percentile_top?: number | null;
+}
+
+export interface TechnicalConditions {
+  above_ma: number[];
+  macd_cross?: CrossSignal | null;
+  kdj_cross?: CrossSignal | null;
+  rsi?: RangeFilter | null;
+  pct_chg_n?: RangeFilter | null;
+  pct_chg_days: number;
+  turnover_rate?: RangeFilter | null;
+  volume_ratio?: RangeFilter | null;
+  breakout_days?: number | null;
+  limit_up_days_min?: number | null;
+}
+
+export interface CapitalConditions {
+  north_inflow_min?: number | null;
+  main_net_inflow_min?: number | null;
+  margin_balance_delta_min?: number | null;
+  institution_holding_ratio_min?: number | null;
+  top_list_score_min?: number | null;
+}
+
+export interface SentimentConditions {
+  days: number;
+  min_avg_score?: number | null;
+  include_labels: string[];
+  whitelist_keywords: string[];
+  blacklist_keywords: string[];
+  max_negative_ratio?: number | null;
+}
+
+export interface FilterOptions {
+  exclude_st?: boolean | null;
+  exclude_paused?: boolean | null;
+  new_stock_days?: number | null;
+  min_market_cap?: number | null;
+}
+
+export interface WeightOptions {
+  fundamental: number;
+  technical: number;
+  capital: number;
+  sentiment: number;
+}
+
+export interface ScreeningRequest {
+  logic: LogicMode;
+  index: IndexConditions;
+  fundamental: FundamentalConditions;
+  technical: TechnicalConditions;
+  capital: CapitalConditions;
+  sentiment: SentimentConditions;
+  filters: FilterOptions;
+  weights: WeightOptions;
+  limit: number;
+}
+
+export interface StockScore {
+  ts_code: string;
+  symbol: string;
+  name: string;
+  industry?: string | null;
+  index_names: string[];
+  close?: number | null;
+  pct_chg?: number | null;
+  pe_ttm?: number | null;
+  pb?: number | null;
+  roe?: number | null;
+  revenue_yoy?: number | null;
+  circ_mv?: number | null;
+  main_net_inflow?: number | null;
+  sentiment_score: number;
+  sentiment_label: string;
+  fundamental_score: number;
+  technical_score: number;
+  capital_score: number;
+  sentiment_factor_score: number;
+  ai_score: number;
+  rating: Rating;
+  metrics: Record<string, number | string | null | undefined>;
+}
+
+export interface ScreeningResult {
+  total: number;
+  rows: StockScore[];
+  industry_distribution: Record<string, number>;
+  sentiment_distribution: Record<string, number>;
+  factor_distribution: Record<string, number[]>;
+  latest_trade_date?: string | null;
+}
+
+export interface IndexMeta {
+  index_code: string;
+  name: string;
+  category: string;
+  member_count: number;
+  pe?: number | null;
+  pb?: number | null;
+  pe_percentile?: number | null;
+  pb_percentile?: number | null;
+}
+
+export interface KLinePoint {
+  trade_date: string;
+  open: number;
+  close: number;
+  low: number;
+  high: number;
+  volume: number;
+  ma5?: number | null;
+  ma10?: number | null;
+  ma20?: number | null;
+  ma60?: number | null;
+}
+
+export interface StockNewsItem {
+  id: number;
+  title: string;
+  content: string;
+  source?: string | null;
+  publish_time: string;
+  sentiment_score: number;
+  sentiment_label: string;
+  keywords: string[];
+}
+
+export interface StockDetail {
+  base: StockScore;
+  kline: KLinePoint[];
+  news: StockNewsItem[];
+  radar: Record<string, number>;
+  rating: string;
+}
+
+export interface StrategyOut {
+  id: number;
+  name: string;
+  remark: string;
+  conditions: ScreeningRequest;
+  result_count: number;
+  avg_score: number;
+  avg_pct_chg: number;
+  schedule_enabled: boolean;
+  schedule_cron: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowStepTrace {
+  id: string;
+  name: string;
+  type: string;
+  status: 'success' | 'skipped' | 'failed' | 'fallback';
+  started_at: string;
+  finished_at: string;
+  summary: string;
+  output_preview: Record<string, unknown>;
+}
+
+export interface WorkflowInfo {
+  name: string;
+  description: string;
+  version: string;
+  path: string;
+  is_default?: boolean;
+  error?: string;
+  steps: Array<{
+    id?: string;
+    name?: string;
+    type?: string;
+    enabled?: boolean;
+  }>;
+}
+
+export interface StockSelectionWorkflowResult {
+  workflow_name: string;
+  workflow_path: string;
+  parsed_request: ScreeningRequest;
+  screening_result?: ScreeningResult | null;
+  llm_analysis: Record<string, unknown>;
+  raw_conditions: Record<string, unknown>;
+  steps: WorkflowStepTrace[];
+}
+
+export type SearchType = 'web' | 'image' | 'web_summary';
+
+export interface WebSearchRequest {
+  query?: string | null;
+  queries?: string[];
+  count?: number | null;
+  time_range?: string | null;
+  search_type?: SearchType | null;
+  need_summary?: boolean | null;
+  need_content?: boolean | null;
+  sites?: string | null;
+}
+
+export interface WebSearchItem {
+  type: 'web' | 'image';
+  query: string;
+  title: string;
+  url: string;
+  site_name?: string | null;
+  snippet: string;
+  summary: string;
+  content: string;
+  publish_time?: string | null;
+  rank_score?: number | null;
+  image_url?: string | null;
+  image_width?: number | null;
+  image_height?: number | null;
+}
+
+export interface WebSearchResponse {
+  provider: string;
+  search_type: string;
+  queries: string[];
+  total: number;
+  items: WebSearchItem[];
+  rag?: string | null;
+  request_ids: string[];
+  time_cost_ms?: number | null;
+}
+
+export interface AppConfig {
+  server: {
+    host: string;
+    port: number;
+    cors_origins: string[];
+  };
+  database: {
+    path: string;
+  };
+  market_data: {
+    provider: 'auto' | 'akshare' | 'tushare' | 'demo';
+    fallback_to_demo: boolean;
+    clear_factor_cache_on_sync: boolean;
+  };
+  akshare: {
+    enabled: boolean;
+    adjust: string;
+    request_interval_seconds: number;
+    default_start_date: string;
+    default_end_date: string;
+    max_history_symbols: number;
+    max_financial_symbols: number;
+    max_news_symbols: number;
+    max_metadata_symbols: number;
+  };
+  tushare: {
+    enabled: boolean;
+    token: string;
+    request_interval_seconds: number;
+    default_start_date: string;
+    default_trade_date: string;
+  };
+  llm: {
+    provider: string;
+    api_base: string;
+    api_key: string;
+    model: string;
+    temperature: number;
+    max_tokens: number;
+    timeout_seconds: number;
+    num_retries: number;
+    local_model_path: string;
+  };
+  search: {
+    enabled: boolean;
+    base_url: string;
+    api_key: string;
+    model: string;
+    timeout_seconds: number;
+    default_count: number;
+    max_count: number;
+    default_search_type: SearchType;
+    need_summary: boolean;
+    need_content: boolean;
+  };
+  workflow: {
+    enabled: boolean;
+    default_path: string;
+    trace_payload_preview: boolean;
+  };
+  filters: {
+    exclude_st: boolean;
+    exclude_paused: boolean;
+    new_stock_days: number;
+    min_market_cap: number;
+  };
+  weights: WeightOptions;
+  scheduler: {
+    enabled: boolean;
+    daily_sync_cron: string;
+  };
+}

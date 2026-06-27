@@ -1,0 +1,74 @@
+[server]
+host = "127.0.0.1"
+port = 8000
+cors_origins = ["http://127.0.0.1:5173", "http://localhost:5173"]
+
+[database]
+path = "backend/data/stock_picker.sqlite3"
+
+[market_data]
+provider = "auto"
+fallback_to_demo = true
+clear_factor_cache_on_sync = true
+
+[akshare]
+enabled = true
+adjust = "qfq"
+request_interval_seconds = 0.4
+default_start_date = "20240101"
+default_end_date = ""
+max_history_symbols = 80
+max_financial_symbols = 80
+max_news_symbols = 50
+max_metadata_symbols = 80
+
+[tushare]
+enabled = true
+token = ""
+request_interval_seconds = 0.35
+default_start_date = "20240101"
+default_trade_date = ""
+
+[llm]
+provider = "heuristic"
+api_base = ""
+api_key = ""
+model = ""
+temperature = 0.3
+max_tokens = 4000
+timeout_seconds = 120
+num_retries = 3
+local_model_path = ""
+
+[search]
+enabled = true
+base_url = "https://open.feedcoopapi.com/search_api/web_search"
+api_key = ""
+model = "volc-search"
+timeout_seconds = 30
+default_count = 8
+max_count = 20
+default_search_type = "web"
+need_summary = true
+need_content = false
+
+[workflow]
+enabled = true
+default_path = ""
+trace_payload_preview = true
+
+[filters]
+exclude_st = true
+exclude_paused = true
+new_stock_days = 180
+min_market_cap = 0
+
+[weights]
+fundamental = 35
+technical = 30
+capital = 20
+sentiment = 15
+
+[scheduler]
+enabled = true
+daily_sync_cron = "30 18 * * 1-5"

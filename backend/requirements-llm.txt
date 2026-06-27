@@ -1,0 +1,4 @@
+# 可选大模型依赖：只有在使用 OpenAI SDK 或本地 transformers 模型时需要安装。
+openai==1.58.1
+transformers==4.47.1
+torch>=2.5.0

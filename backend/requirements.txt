@@ -1,0 +1,11 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pandas==2.2.3
+numpy==2.2.1
+akshare==1.17.83
+tushare==1.4.21
+apscheduler==3.11.0
+httpx==0.28.1
+python-multipart==0.0.20
+tomli==2.2.1

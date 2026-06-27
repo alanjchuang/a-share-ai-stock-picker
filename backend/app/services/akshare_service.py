@@ -1,0 +1,600 @@
+from __future__ import annotations
+
+import math
+import sqlite3
+import time
+from datetime import datetime, timedelta
+from typing import Any
+
+import pandas as pd
+
+from app.core.config import load_settings
+from app.models.schemas import SyncRequest
+from app.services.tushare_service import INDEX_CODE_MAP
+
+
+BOARD_INDEX_MAP = {
+    "CONCEPT_AI": ("AI算力概念", "热门赛道", "concept", ["人工智能", "算力概念", "ChatGPT概念"]),
+    "CONCEPT_SEMI": ("半导体国产替代", "热门赛道", "concept", ["半导体", "芯片概念", "国产芯片"]),
+    "CONCEPT_STORAGE": ("储能新能源", "热门赛道", "concept", ["储能", "新能源车", "光伏设备"]),
+    "CONCEPT_DEFENSE": ("军工安全", "热门赛道", "concept", ["军工", "航天航空"]),
+    "CONCEPT_MEDICAL": ("创新医药", "热门赛道", "concept", ["创新药", "医药商业"]),
+    "801080.SI": ("电子申万一级", "申万行业", "industry", ["电子元件", "半导体"]),
+    "801120.SI": ("食品饮料申万一级", "申万行业", "industry", ["酿酒行业", "食品饮料"]),
+    "801790.SI": ("非银金融申万一级", "申万行业", "industry", ["证券", "保险"]),
+    "801780.SI": ("银行申万一级", "申万行业", "industry", ["银行"]),
+}
+
+
+class AkshareService:
+    """AKShare公开数据同步。
+
+    AKShare以网页公开数据封装为主，不同站点偶尔会调整字段名，因此这里统一做字段兜底：
+    能取到的数据尽量落库，单个接口失败不会中断整次同步。
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+        self.settings = load_settings()
+        try:
+            import akshare as ak
+        except ImportError as exc:
+            raise RuntimeError("未安装akshare，请先安装backend/requirements.txt") from exc
+        self.ak = ak
+
+    def sync(self, request: SyncRequest) -> dict[str, Any]:
+        if not self.settings.akshare.enabled:
+            raise RuntimeError("AKShare数据源已在配置中禁用")
+
+        start_date = request.start_date or self.settings.akshare.default_start_date
+        end_date = request.end_date or self.settings.akshare.default_end_date or self._last_workday()
+        trade_date = request.trade_date or end_date
+
+        summary: dict[str, Any] = {
+            "mode": "akshare",
+            "trade_date": trade_date,
+            "start_date": start_date,
+            "end_date": end_date,
+            "tables": {},
+            "warnings": [],
+        }
+
+        spot_df = self._safe_call("A股实时行情", self.ak.stock_zh_a_spot_em, summary=summary)
+        if spot_df is None or spot_df.empty:
+            raise RuntimeError("AKShare未返回A股实时行情")
+
+        spot_df = self._normalize_spot(spot_df)
+        summary["tables"]["stocks"] = self._sync_spot_stocks(spot_df)
+        summary["tables"]["daily_spot"] = self._sync_spot_daily_and_basic(spot_df, trade_date)
+
+        if request.sync_indices:
+            summary["tables"]["indices"] = self._sync_indices(start_date, end_date, summary)
+            summary["tables"]["boards"] = self._sync_boards(spot_df, trade_date, summary)
+        if request.sync_fundamentals:
+            summary["tables"]["financial_indicators"] = self._sync_financial_indicators(spot_df, start_date[:4], trade_date, summary)
+        summary["tables"]["capital_flows"] = self._sync_capital_flows(spot_df, summary)
+        summary["tables"]["history"] = self._sync_history(spot_df, start_date, end_date, summary)
+        if request.sync_news:
+            summary["tables"]["news"] = self._sync_news(spot_df, summary)
+
+        self.conn.commit()
+        return summary
+
+    def _sync_spot_stocks(self, df: pd.DataFrame) -> int:
+        count = 0
+        metadata = self._metadata_for_symbols(df["代码"].head(max(0, self.settings.akshare.max_metadata_symbols)).tolist())
+        for item in df.to_dict(orient="records"):
+            symbol = self._symbol(item["代码"])
+            ts_code = self._ts_code(symbol)
+            name = str(item.get("名称") or "")
+            meta = metadata.get(symbol, {})
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO stocks
+                (ts_code, symbol, name, area, industry, market, exchange, list_date, is_hs, is_st, is_paused, updated_at)
+                VALUES (
+                    ?, ?, ?,
+                    COALESCE(NULLIF(?, ''), (SELECT area FROM stocks WHERE ts_code = ?)),
+                    COALESCE(NULLIF(?, ''), (SELECT industry FROM stocks WHERE ts_code = ?)),
+                    COALESCE(NULLIF(?, ''), (SELECT market FROM stocks WHERE ts_code = ?)),
+                    ?, COALESCE(NULLIF(?, ''), (SELECT list_date FROM stocks WHERE ts_code = ?)),
+                    COALESCE((SELECT is_hs FROM stocks WHERE ts_code = ?), ''),
+                    ?, ?, CURRENT_TIMESTAMP
+                )
+                """,
+                (
+                    ts_code,
+                    symbol,
+                    name,
+                    str(meta.get("area") or ""),
+                    ts_code,
+                    str(meta.get("industry") or ""),
+                    ts_code,
+                    str(meta.get("market") or ""),
+                    ts_code,
+                    self._exchange(symbol),
+                    str(meta.get("list_date") or ""),
+                    ts_code,
+                    ts_code,
+                    1 if "ST" in name.upper() else 0,
+                    1 if self._num(item.get("最新价")) <= 0 else 0,
+                ),
+            )
+            count += 1
+        return count
+
+    def _sync_spot_daily_and_basic(self, df: pd.DataFrame, trade_date: str) -> int:
+        count = 0
+        for item in df.to_dict(orient="records"):
+            symbol = self._symbol(item["代码"])
+            ts_code = self._ts_code(symbol)
+            close = self._num(item.get("最新价"))
+            pre_close = self._num(item.get("昨收"))
+            change = self._num(item.get("涨跌额"))
+            pct_chg = self._num(item.get("涨跌幅"))
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO stock_daily
+                (ts_code, trade_date, open, high, low, close, pre_close, change, pct_chg, vol, amount, turnover_rate, volume_ratio)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts_code,
+                    trade_date,
+                    self._num(item.get("今开")),
+                    self._num(item.get("最高")),
+                    self._num(item.get("最低")),
+                    close,
+                    pre_close,
+                    change if change else close - pre_close if pre_close else 0,
+                    pct_chg,
+                    self._num(item.get("成交量")),
+                    self._num(item.get("成交额")),
+                    self._num(item.get("换手率")),
+                    self._num(item.get("量比")),
+                ),
+            )
+            existing = self.conn.execute(
+                "SELECT * FROM fundamentals WHERE ts_code = ? AND trade_date = ?",
+                (ts_code, trade_date),
+            ).fetchone()
+            old = dict(existing) if existing else {}
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO fundamentals
+                (ts_code, trade_date, pe_ttm, pb, peg, roe, gross_margin, netprofit_margin, revenue_yoy,
+                 deduct_profit_yoy, debt_to_assets, ocf, dividend_yield, total_mv, circ_mv, goodwill_ratio)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts_code,
+                    trade_date,
+                    self._num(item.get("市盈率-动态")) or old.get("pe_ttm", 0),
+                    self._num(item.get("市净率")) or old.get("pb", 0),
+                    old.get("peg", 0),
+                    old.get("roe", 0),
+                    old.get("gross_margin", 0),
+                    old.get("netprofit_margin", 0),
+                    old.get("revenue_yoy", 0),
+                    old.get("deduct_profit_yoy", 0),
+                    old.get("debt_to_assets", 0),
+                    old.get("ocf", 0),
+                    old.get("dividend_yield", 0),
+                    round(self._num(item.get("总市值")) / 100_000_000, 2),
+                    round(self._num(item.get("流通市值")) / 100_000_000, 2),
+                    old.get("goodwill_ratio", 0),
+                ),
+            )
+            count += 1
+        return count
+
+    def _sync_history(self, df: pd.DataFrame, start_date: str, end_date: str, summary: dict[str, Any]) -> int:
+        symbols = self._candidate_symbols(df, self.settings.akshare.max_history_symbols)
+        count = 0
+        for symbol in symbols:
+            hist = self._safe_call(
+                f"{symbol}历史行情",
+                self.ak.stock_zh_a_hist,
+                symbol=symbol,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date,
+                adjust=self.settings.akshare.adjust,
+                summary=summary,
+            )
+            if hist is None or hist.empty:
+                continue
+            count += self._insert_history(symbol, hist)
+            self._sleep()
+        return count
+
+    def _sync_financial_indicators(self, df: pd.DataFrame, start_year: str, trade_date: str, summary: dict[str, Any]) -> int:
+        symbols = self._candidate_symbols(df, self.settings.akshare.max_financial_symbols)
+        count = 0
+        for symbol in symbols:
+            fin = self._safe_call(
+                f"{symbol}财务指标",
+                self.ak.stock_financial_analysis_indicator,
+                symbol=symbol,
+                start_year=start_year,
+                summary=summary,
+            )
+            if fin is None or fin.empty:
+                continue
+            latest = fin.sort_values("日期").iloc[-1].to_dict()
+            ts_code = self._ts_code(symbol)
+            existing = self.conn.execute(
+                "SELECT * FROM fundamentals WHERE ts_code = ? AND trade_date = ?",
+                (ts_code, trade_date),
+            ).fetchone()
+            old = dict(existing) if existing else {}
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO fundamentals
+                (ts_code, trade_date, pe_ttm, pb, peg, roe, gross_margin, netprofit_margin, revenue_yoy,
+                 deduct_profit_yoy, debt_to_assets, ocf, dividend_yield, total_mv, circ_mv, goodwill_ratio)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts_code,
+                    trade_date,
+                    old.get("pe_ttm", 0),
+                    old.get("pb", 0),
+                    old.get("peg", 0),
+                    self._pick_num(latest, ["净资产收益率(%)", "加权净资产收益率(%)"], old.get("roe", 0)),
+                    self._pick_num(latest, ["销售毛利率(%)"], old.get("gross_margin", 0)),
+                    self._pick_num(latest, ["销售净利率(%)"], old.get("netprofit_margin", 0)),
+                    self._pick_num(latest, ["主营业务收入增长率(%)", "营业总收入同比增长率(%)"], old.get("revenue_yoy", 0)),
+                    self._pick_num(latest, ["净利润增长率(%)", "扣非净利润同比增长率(%)"], old.get("deduct_profit_yoy", 0)),
+                    self._pick_num(latest, ["资产负债率(%)"], old.get("debt_to_assets", 0)),
+                    self._pick_num(latest, ["经营现金净流量与净利润的比率(%)", "每股经营性现金流(元)"], old.get("ocf", 0)),
+                    self._pick_num(latest, ["股息发放率(%)"], old.get("dividend_yield", 0)),
+                    old.get("total_mv", 0),
+                    old.get("circ_mv", 0),
+                    old.get("goodwill_ratio", 0),
+                ),
+            )
+            count += 1
+            self._sleep()
+        return count
+
+    def _sync_capital_flows(self, df: pd.DataFrame, summary: dict[str, Any]) -> int:
+        symbols = self._candidate_symbols(df, self.settings.akshare.max_history_symbols)
+        count = 0
+        for symbol in symbols:
+            market = self._exchange(symbol).lower()
+            if market == "bj":
+                continue
+            flow = self._safe_call(
+                f"{symbol}资金流",
+                self.ak.stock_individual_fund_flow,
+                stock=symbol,
+                market=market,
+                summary=summary,
+            )
+            if flow is None or flow.empty:
+                continue
+            for item in flow.tail(60).to_dict(orient="records"):
+                trade_date = self._date8(item.get("日期"))
+                if not trade_date:
+                    continue
+                self.conn.execute(
+                    """
+                    INSERT OR REPLACE INTO capital_flows
+                    (ts_code, trade_date, north_inflow, main_net_inflow, margin_balance_delta, institution_holding_ratio, top_list_score)
+                    VALUES (?, ?, COALESCE((SELECT north_inflow FROM capital_flows WHERE ts_code=? AND trade_date=?), 0),
+                            ?, COALESCE((SELECT margin_balance_delta FROM capital_flows WHERE ts_code=? AND trade_date=?), 0),
+                            COALESCE((SELECT institution_holding_ratio FROM capital_flows WHERE ts_code=? AND trade_date=?), 0), ?)
+                    """,
+                    (
+                        self._ts_code(symbol),
+                        trade_date,
+                        self._ts_code(symbol),
+                        trade_date,
+                        round(self._num(item.get("主力净流入-净额")) / 10_000, 2),
+                        self._ts_code(symbol),
+                        trade_date,
+                        self._ts_code(symbol),
+                        trade_date,
+                        self._flow_score(item.get("主力净流入-净占比")),
+                    ),
+                )
+                count += 1
+            self._sleep()
+        return count
+
+    def _sync_news(self, df: pd.DataFrame, summary: dict[str, Any]) -> int:
+        symbols = self._candidate_symbols(df, self.settings.akshare.max_news_symbols)
+        count = 0
+        for symbol in symbols:
+            news = self._safe_call(f"{symbol}新闻", self.ak.stock_news_em, symbol=symbol, summary=summary)
+            if news is None or news.empty:
+                continue
+            for item in news.head(20).to_dict(orient="records"):
+                title = str(self._pick(item, ["新闻标题", "标题", "title"], ""))
+                content = str(self._pick(item, ["新闻内容", "内容", "摘要", "title"], title))
+                if not title and not content:
+                    continue
+                publish_time = str(self._pick(item, ["发布时间", "时间", "datetime"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                self.conn.execute(
+                    """
+                    INSERT INTO stock_news(ts_code, title, content, source, publish_time, sentiment_score, sentiment_label, keywords)
+                    VALUES (?, ?, ?, ?, ?, 50, '中性', ?)
+                    """,
+                    (
+                        self._ts_code(symbol),
+                        title[:160],
+                        content[:2000],
+                        str(self._pick(item, ["文章来源", "来源"], "akshare-news")),
+                        publish_time,
+                        str(self._pick(item, ["关键词"], "")),
+                    ),
+                )
+                count += 1
+            self._sleep()
+        return count
+
+    def _sync_indices(self, start_date: str, end_date: str, summary: dict[str, Any]) -> int:
+        count = 0
+        for index_code, name in INDEX_CODE_MAP.items():
+            symbol = index_code.split(".")[0]
+            self.conn.execute("INSERT OR REPLACE INTO index_info(index_code, name, category) VALUES (?, ?, ?)", (index_code, name, "宽基"))
+            hist = self._safe_call(
+                f"{name}指数行情",
+                self.ak.index_zh_a_hist,
+                symbol=symbol,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date,
+                summary=summary,
+            )
+            if hist is not None and not hist.empty:
+                for item in hist.to_dict(orient="records"):
+                    self.conn.execute(
+                        "INSERT OR REPLACE INTO index_daily(index_code, trade_date, close, pct_chg, momentum_20) VALUES (?, ?, ?, ?, ?)",
+                        (index_code, self._date8(item.get("日期")), self._num(item.get("收盘")), self._num(item.get("涨跌幅")), 0),
+                    )
+                    count += 1
+            members = self._index_members(symbol, summary)
+            for item in members:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO index_members(index_code, ts_code, weight, in_date, out_date) VALUES (?, ?, ?, ?, '')",
+                    (index_code, self._ts_code(item["symbol"]), item.get("weight", 0), item.get("in_date") or start_date),
+                )
+                count += 1
+            self._sleep()
+        self._recalculate_index_momentum()
+        return count
+
+    def _sync_boards(self, spot_df: pd.DataFrame, trade_date: str, summary: dict[str, Any]) -> int:
+        count = 0
+        spot_lookup = {self._symbol(row["代码"]): row for row in spot_df.to_dict(orient="records")}
+        for index_code, (name, category, kind, candidates) in BOARD_INDEX_MAP.items():
+            self.conn.execute("INSERT OR REPLACE INTO index_info(index_code, name, category) VALUES (?, ?, ?)", (index_code, name, category))
+            members: list[str] = []
+            for board_name in candidates:
+                func = self.ak.stock_board_concept_cons_em if kind == "concept" else self.ak.stock_board_industry_cons_em
+                board = self._safe_call(f"{board_name}板块成分", func, symbol=board_name, summary=summary)
+                if board is not None and not board.empty:
+                    members = [self._symbol(item) for item in board["代码"].astype(str).tolist()]
+                    break
+            for symbol in members:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO index_members(index_code, ts_code, weight, in_date, out_date) VALUES (?, ?, ?, ?, '')",
+                    (index_code, self._ts_code(symbol), 0, trade_date),
+                )
+                count += 1
+            board_closes = [self._num(spot_lookup.get(symbol, {}).get("最新价")) for symbol in members if symbol in spot_lookup]
+            board_pct = [self._num(spot_lookup.get(symbol, {}).get("涨跌幅")) for symbol in members if symbol in spot_lookup]
+            if board_closes:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO index_daily(index_code, trade_date, close, pct_chg, momentum_20) VALUES (?, ?, ?, ?, ?)",
+                    (index_code, trade_date, round(sum(board_closes) / len(board_closes), 2), round(sum(board_pct) / max(1, len(board_pct)), 2), 0),
+                )
+                count += 1
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO index_valuation(index_code, trade_date, pe, pb, pe_percentile, pb_percentile)
+                VALUES (?, ?, COALESCE((SELECT pe FROM index_valuation WHERE index_code=? ORDER BY trade_date DESC LIMIT 1), 0),
+                        COALESCE((SELECT pb FROM index_valuation WHERE index_code=? ORDER BY trade_date DESC LIMIT 1), 0),
+                        COALESCE((SELECT pe_percentile FROM index_valuation WHERE index_code=? ORDER BY trade_date DESC LIMIT 1), 50),
+                        COALESCE((SELECT pb_percentile FROM index_valuation WHERE index_code=? ORDER BY trade_date DESC LIMIT 1), 50))
+                """,
+                (index_code, trade_date, index_code, index_code, index_code, index_code),
+            )
+            self._sleep()
+        return count
+
+    def _metadata_for_symbols(self, symbols: list[str]) -> dict[str, dict[str, str]]:
+        result: dict[str, dict[str, str]] = {}
+        for symbol in symbols:
+            info = self._safe_call(f"{symbol}基础信息", self.ak.stock_individual_info_em, symbol=symbol)
+            if info is None or info.empty:
+                continue
+            meta: dict[str, str] = {}
+            for row in info.to_dict(orient="records"):
+                key = str(self._pick(row, ["item", "项目", "指标"], ""))
+                value = str(self._pick(row, ["value", "值", "信息"], ""))
+                if "行业" in key:
+                    meta["industry"] = value
+                if "上市时间" in key or "上市日期" in key:
+                    meta["list_date"] = self._date8(value)
+                if "市场" in key:
+                    meta["market"] = value
+            result[symbol] = meta
+            self._sleep()
+        return result
+
+    def _index_members(self, symbol: str, summary: dict[str, Any]) -> list[dict[str, Any]]:
+        funcs = [
+            (self.ak.index_stock_cons, {"symbol": symbol}),
+            (self.ak.index_stock_cons_csindex, {"symbol": symbol}),
+            (self.ak.index_stock_cons_sina, {"symbol": symbol}),
+        ]
+        for func, kwargs in funcs:
+            df = self._safe_call(f"{symbol}指数成分", func, summary=summary, **kwargs)
+            if df is None or df.empty:
+                continue
+            rows: list[dict[str, Any]] = []
+            for item in df.to_dict(orient="records"):
+                code = str(self._pick(item, ["品种代码", "成分券代码", "证券代码", "code"], ""))
+                if code:
+                    rows.append(
+                        {
+                            "symbol": self._symbol(code),
+                            "weight": self._pick_num(item, ["权重", "权重(%)"], 0),
+                            "in_date": self._date8(self._pick(item, ["纳入日期", "日期"], "")),
+                        }
+                    )
+            if rows:
+                return rows
+        return []
+
+    def _insert_history(self, symbol: str, hist: pd.DataFrame) -> int:
+        count = 0
+        ts_code = self._ts_code(symbol)
+        data = hist.sort_values("日期").to_dict(orient="records")
+        previous_close = 0.0
+        for item in data:
+            trade_date = self._date8(item.get("日期"))
+            close = self._num(item.get("收盘"))
+            pre_close = previous_close or close - self._num(item.get("涨跌额"))
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO stock_daily
+                (ts_code, trade_date, open, high, low, close, pre_close, change, pct_chg, vol, amount, turnover_rate, volume_ratio)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT volume_ratio FROM stock_daily WHERE ts_code=? AND trade_date=?), 0))
+                """,
+                (
+                    ts_code,
+                    trade_date,
+                    self._num(item.get("开盘")),
+                    self._num(item.get("最高")),
+                    self._num(item.get("最低")),
+                    close,
+                    pre_close,
+                    self._num(item.get("涨跌额")) or close - pre_close,
+                    self._num(item.get("涨跌幅")),
+                    self._num(item.get("成交量")),
+                    self._num(item.get("成交额")),
+                    self._num(item.get("换手率")),
+                    ts_code,
+                    trade_date,
+                ),
+            )
+            previous_close = close
+            count += 1
+        return count
+
+    def _candidate_symbols(self, df: pd.DataFrame, limit: int) -> list[str]:
+        existing = [row["symbol"] for row in self.conn.execute("SELECT symbol FROM stocks ORDER BY ts_code").fetchall()]
+        ordered = list(dict.fromkeys([self._symbol(symbol) for symbol in existing + df["代码"].astype(str).tolist()]))
+        if limit <= 0:
+            return ordered
+        return ordered[:limit]
+
+    def _safe_call(self, label: str, func: Any, summary: dict[str, Any] | None = None, **kwargs: Any) -> pd.DataFrame | None:
+        try:
+            value = func(**kwargs)
+            if isinstance(value, pd.DataFrame):
+                return value
+            return pd.DataFrame(value)
+        except Exception as exc:
+            if summary is not None:
+                warnings = summary.setdefault("warnings", [])
+                if len(warnings) < 30:
+                    warnings.append(f"{label}失败：{exc}")
+            return None
+
+    def _normalize_spot(self, df: pd.DataFrame) -> pd.DataFrame:
+        data = df.copy()
+        data["代码"] = data["代码"].astype(str).str.zfill(6)
+        data = data[data["代码"].str.match(r"^\d{6}$", na=False)]
+        return data
+
+    @staticmethod
+    def _pick(row: dict[str, Any], keys: list[str], default: Any = None) -> Any:
+        for key in keys:
+            if key in row and row[key] is not None:
+                return row[key]
+        return default
+
+    def _pick_num(self, row: dict[str, Any], keys: list[str], default: float = 0.0) -> float:
+        for key in keys:
+            if key in row:
+                value = self._num(row.get(key))
+                if value:
+                    return value
+        return float(default or 0)
+
+    @staticmethod
+    def _num(value: Any) -> float:
+        try:
+            if value is None:
+                return 0.0
+            number = float(value)
+            if math.isnan(number) or math.isinf(number):
+                return 0.0
+            return number
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _symbol(value: Any) -> str:
+        raw = str(value).strip().upper()
+        if "." in raw:
+            raw = raw.split(".")[0]
+        return raw.zfill(6)
+
+    @staticmethod
+    def _exchange(symbol: str) -> str:
+        if symbol.startswith(("8", "4", "920")):
+            return "BJ"
+        if symbol.startswith(("0", "2", "3")):
+            return "SZ"
+        return "SH"
+
+    def _ts_code(self, symbol: str) -> str:
+        return f"{self._symbol(symbol)}.{self._exchange(self._symbol(symbol))}"
+
+    @staticmethod
+    def _date8(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        try:
+            return pd.to_datetime(text).strftime("%Y%m%d")
+        except Exception:
+            return text.replace("-", "")[:8]
+
+    @staticmethod
+    def _flow_score(value: Any) -> float:
+        number = AkshareService._num(value)
+        return round(max(0, min(100, 50 + number * 2)), 2)
+
+    @staticmethod
+    def _last_workday() -> str:
+        day = datetime.now().date()
+        while day.weekday() >= 5:
+            day -= timedelta(days=1)
+        return day.strftime("%Y%m%d")
+
+    def _sleep(self) -> None:
+        time.sleep(max(0, self.settings.akshare.request_interval_seconds))
+
+    def _recalculate_index_momentum(self) -> None:
+        rows = self.conn.execute("SELECT DISTINCT index_code FROM index_daily").fetchall()
+        for row in rows:
+            df = pd.read_sql_query(
+                "SELECT trade_date, close FROM index_daily WHERE index_code = ? ORDER BY trade_date ASC",
+                self.conn,
+                params=(row["index_code"],),
+            )
+            if df.empty:
+                continue
+            df["momentum_20"] = df["close"].pct_change(20).fillna(0) * 100
+            for item in df.to_dict(orient="records"):
+                self.conn.execute(
+                    "UPDATE index_daily SET momentum_20 = ? WHERE index_code = ? AND trade_date = ?",
+                    (round(float(item["momentum_20"]), 2), row["index_code"], item["trade_date"]),
+                )

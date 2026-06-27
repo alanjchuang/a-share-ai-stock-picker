@@ -1,0 +1,112 @@
+name = "a_share_stock_selection_workflow"
+description = "AgentLoom-style configurable workflow for A-share LLM-assisted stock selection."
+version = "1.0.0"
+mode = "sequential"
+
+[[steps]]
+id = "intent_parser"
+name = "自然语言条件解析"
+type = "llm_intent_parse"
+enabled = true
+fallback = "heuristic_parse"
+output_key = "raw_conditions"
+prompt = """
+你是A股量化选股条件解析 Agent。把用户的自然语言选股需求转换为严格 JSON。
+
+只输出 JSON，不要输出 Markdown，不要解释。
+
+顶层字段必须为：
+logic,index,fundamental,technical,capital,sentiment,filters,weights,limit
+
+字段说明：
+- logic: "and" 或 "or"
+- index.index_codes: 指数代码数组
+- fundamental: PE/PB/PEG/ROE/营收同比/扣非净利同比/资产负债率/市值等区间，区间格式 {"min":数字或null,"max":数字或null}
+- technical: above_ma, macd_cross, kdj_cross, rsi, pct_chg_n, pct_chg_days, turnover_rate, volume_ratio, breakout_days, limit_up_days_min
+- capital: north_inflow_min, main_net_inflow_min, margin_balance_delta_min, institution_holding_ratio_min, top_list_score_min
+- sentiment: days, min_avg_score, include_labels, whitelist_keywords, blacklist_keywords, max_negative_ratio
+- filters: exclude_st, exclude_paused, new_stock_days, min_market_cap
+- weights: fundamental, technical, capital, sentiment
+- limit: 返回上限
+
+指数映射：
+{{index_aliases_json}}
+
+默认权重：
+{{default_weights_json}}
+
+用户需求：
+{{user_text}}
+"""
+
+[[steps]]
+id = "condition_guard"
+name = "条件校验与风控补全"
+type = "condition_guard"
+enabled = true
+fallback = "heuristic_parse"
+output_key = "screening_request"
+
+[[steps]]
+id = "deterministic_screen"
+name = "多因子确定性筛选"
+type = "screen"
+enabled = true
+output_key = "screening_result"
+candidate_limit = 80
+
+[[steps]]
+id = "web_research"
+name = "火山搜索实时资料检索"
+type = "web_search"
+enabled = true
+fallback = "empty_search_context"
+output_key = "web_search_context"
+search_type = "web"
+count = 8
+result_limit = 8
+candidate_limit = 8
+query_template = "{{user_text}} A股 最新 政策 财报 舆情 新闻 候选股：{{candidate_names}}"
+
+[[steps]]
+id = "candidate_reviewer"
+name = "候选股大模型复核"
+type = "llm_candidate_review"
+enabled = true
+fallback = "deterministic_summary"
+candidate_limit = 20
+output_key = "llm_analysis"
+prompt = """
+你是A股量化研究员 Agent，负责复核多因子筛选结果。
+
+请只输出 JSON，不要输出 Markdown。JSON 字段：
+{
+  "market_view": "一句话总结当前筛选逻辑与候选池质量",
+  "selection_logic": ["要点1", "要点2", "要点3"],
+  "risk_notes": ["风险1", "风险2"],
+  "watchlist": [
+    {
+      "ts_code": "股票代码",
+      "name": "股票名称",
+      "reason": "入选理由",
+      "risk": "主要风险",
+      "confidence": 0-100
+    }
+  ],
+  "disclaimer": "不构成投资建议"
+}
+
+用户原始需求：
+{{user_text}}
+
+结构化筛选条件：
+{{screening_request_json}}
+
+候选股样本：
+{{candidate_rows_json}}
+
+火山搜索实时资料：
+{{web_search_context_json}}
+
+请把搜索资料只作为公开信息辅助校验，优先识别利好兑现、政策催化、监管问询、减持、诉讼、业绩预警等风险。不要编造搜索资料中没有出现的事实。
+"""
