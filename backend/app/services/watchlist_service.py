@@ -353,6 +353,9 @@ class WatchlistService:
         )
 
     def _ensure_default_groups(self) -> None:
+        existing = self.conn.execute("SELECT COUNT(*) AS count FROM watchlist_groups").fetchone()
+        if existing and int(existing["count"] or 0) >= len(DEFAULT_GROUPS):
+            return
         for name, description, color, sort_order in DEFAULT_GROUPS:
             self.conn.execute(
                 """
