@@ -8,7 +8,7 @@ import {
   StockOutlined,
   SunOutlined
 } from '@ant-design/icons';
-import { Button, Layout, Menu, Space, Typography } from 'antd';
+import { Alert, Button, Layout, Menu, Space, Typography } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import DisclaimerBar from '../components/DisclaimerBar';
 import { useAppStore } from '../store/useAppStore';
@@ -21,6 +21,8 @@ const AppLayout = () => {
   const location = useLocation();
   const themeMode = useAppStore((state) => state.themeMode);
   const setThemeMode = useAppStore((state) => state.setThemeMode);
+  const lastError = useAppStore((state) => state.lastError);
+  const setLastError = useAppStore((state) => state.setLastError);
 
   return (
     <Layout className="layout-root">
@@ -54,6 +56,17 @@ const AppLayout = () => {
           />
         </Sider>
         <Content className="app-content">
+          {lastError ? (
+            <Alert
+              showIcon
+              closable
+              type="error"
+              message="请求失败"
+              description={lastError}
+              onClose={() => setLastError(null)}
+              style={{ marginBottom: 12 }}
+            />
+          ) : null}
           <Outlet />
         </Content>
       </Layout>

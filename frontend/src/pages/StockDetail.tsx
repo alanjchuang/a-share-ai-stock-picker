@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, ReloadOutlined, StarOutlined } from '@ant-design/icons';
-import { Button, Descriptions, Empty, List, Space, Tag, Typography, message } from 'antd';
+import { Button, Descriptions, Empty, List, Space, Tag, Typography } from 'antd';
 import { PageContainer, ProCard, StatisticCard } from '@ant-design/pro-components';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/modules';
 import type { StockDetail as StockDetailType } from '../types';
 import { runSafely } from '../utils/async';
+import { notifySuccess } from '../utils/feedback';
 
 function klineOption(detail: StockDetailType): EChartsOption {
   const dates = detail.kline.map((item) => item.trade_date);
@@ -84,7 +85,7 @@ const StockDetail = () => {
       priority: detail.base.rating === 'A' ? 5 : detail.base.rating === 'B' ? 4 : 3,
       risk_level: detail.base.sentiment_score < 45 ? 'high' : 'medium'
     });
-    message.success(`${detail.base.name} 已加入自选股`);
+    notifySuccess(`${detail.base.name} 已加入自选股`);
   }
 
   if (!tsCode) return <Empty description="请从工作台选择一只股票" />;

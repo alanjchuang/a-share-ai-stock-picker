@@ -1,5 +1,5 @@
 import { DeleteOutlined, EditOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Form, Modal, Popconfirm, Space, Switch, Typography, message } from 'antd';
+import { Button, Form, Modal, Popconfirm, Space, Switch, Typography } from 'antd';
 import { PageContainer, ProCard, ProForm, ProFormTextArea, ProTable } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
 import ReactECharts from 'echarts-for-react';
@@ -10,6 +10,7 @@ import { api, defaultScreeningRequest } from '../api/modules';
 import { useAppStore } from '../store/useAppStore';
 import type { ScreeningRequest, StrategyOut } from '../types';
 import { runSafely } from '../utils/async';
+import { notifySuccess } from '../utils/feedback';
 
 interface StrategyFormValue {
   name: string;
@@ -84,7 +85,7 @@ const StrategyManager = () => {
     const result = await api.runScreener(strategy.conditions);
     setCurrentRequest(strategy.conditions);
     setLatestResult(result);
-    message.success(`策略执行完成，命中 ${result.total} 只`);
+    notifySuccess(`策略执行完成，命中 ${result.total} 只`);
     navigate('/');
   }
 
@@ -130,7 +131,7 @@ const StrategyManager = () => {
         </ProCard>
         <ProTable<StrategyOut> rowKey="id" search={false} options={false} columns={columns} dataSource={strategies} pagination={{ pageSize: 10 }} cardBordered />
       </Space>
-      <Modal title={editing ? '编辑策略' : '新建策略'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => runSafely(submit())} destroyOnClose>
+      <Modal title={editing ? '编辑策略' : '新建策略'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => runSafely(submit())} destroyOnHidden>
         <ProForm form={form} submitter={false} layout="vertical">
           <ProFormTextArea name="name" label="策略名称" rules={[{ required: true, message: '请输入策略名称' }]} fieldProps={{ autoSize: { minRows: 1, maxRows: 1 } }} />
           <ProFormTextArea name="remark" label="备注" fieldProps={{ autoSize: { minRows: 2, maxRows: 4 } }} />

@@ -130,6 +130,18 @@ export interface ScreeningResult {
   sentiment_distribution: Record<string, number>;
   factor_distribution: Record<string, number[]>;
   latest_trade_date?: string | null;
+  diagnostics?: ScreeningDiagnostics;
+}
+
+export interface ScreeningDiagnostics {
+  stock_universe_count: number;
+  factor_universe_count: number;
+  base_universe_count: number;
+  condition_count: number;
+  matched_count: number;
+  returned_count: number;
+  excluded_counts: Record<string, number>;
+  warnings: string[];
 }
 
 export interface IndexMeta {

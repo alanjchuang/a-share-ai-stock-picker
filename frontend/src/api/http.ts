@@ -1,7 +1,7 @@
 import axios, { AxiosError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios';
-import { message } from 'antd';
 import { useAppStore } from '../store/useAppStore';
 import type { ApiResponse } from '../types';
+import { notifyError } from '../utils/feedback';
 
 const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api',
@@ -17,6 +17,7 @@ function setLoading(loading: boolean): void {
 http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   pendingCount += 1;
   setLoading(true);
+  useAppStore.getState().setLastError(null);
   return config;
 });
 
@@ -26,8 +27,10 @@ http.interceptors.response.use(
     if (pendingCount === 0) setLoading(false);
     const payload = response.data as ApiResponse<unknown>;
     if (payload.code !== 0) {
-      message.error(payload.message || '请求失败');
-      return Promise.reject(new Error(payload.message));
+      const msg = payload.message || '请求失败';
+      useAppStore.getState().setLastError(msg);
+      notifyError(msg);
+      return Promise.reject(new Error(msg));
     }
     return response;
   },
@@ -35,7 +38,8 @@ http.interceptors.response.use(
     pendingCount = Math.max(0, pendingCount - 1);
     if (pendingCount === 0) setLoading(false);
     const msg = error.response?.data?.message ?? error.message ?? '网络错误';
-    message.error(msg);
+    useAppStore.getState().setLastError(msg);
+    notifyError(msg);
     return Promise.reject(error);
   }
 );

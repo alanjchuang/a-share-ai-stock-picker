@@ -1,10 +1,11 @@
 import { ClearOutlined, SaveOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
-import { Button, Form, Space, Switch, message } from 'antd';
+import { Button, Form, Space, Switch } from 'antd';
 import { PageContainer, ProCard, ProForm, ProFormDigit, ProFormSelect, ProFormText } from '@ant-design/pro-components';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/modules';
 import type { AppConfig, WorkflowInfo } from '../types';
 import { runSafely } from '../utils/async';
+import { notifySuccess } from '../utils/feedback';
 
 const SystemConfig = () => {
   const [form] = Form.useForm<AppConfig>();
@@ -27,18 +28,18 @@ const SystemConfig = () => {
   async function save(): Promise<void> {
     const values = await form.validateFields();
     await api.updateConfig(values);
-    message.success('配置已保存');
+    notifySuccess('配置已保存');
   }
 
   async function refresh(): Promise<void> {
     const provider = form.getFieldValue(['market_data', 'provider']) as AppConfig['market_data']['provider'] | undefined;
     await api.syncData(provider);
-    message.success('数据同步完成');
+    notifySuccess('数据同步完成');
   }
 
   async function recalc(): Promise<void> {
     const result = await api.calculateFactors();
-    message.success(`因子缓存已刷新：${result.count} 只股票`);
+    notifySuccess(`因子缓存已刷新：${result.count} 只股票`);
   }
 
   async function testSearch(): Promise<void> {
@@ -49,7 +50,7 @@ const SystemConfig = () => {
       count: Math.min(values.search.default_count || 3, 3),
       search_type: values.search.default_search_type
     });
-    message.success(`火山搜索连通：${result.items.length} 条结果`);
+    notifySuccess(`火山搜索连通：${result.items.length} 条结果`);
   }
 
   return (

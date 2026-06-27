@@ -9,6 +9,7 @@ import {
   ThunderboltOutlined
 } from '@ant-design/icons';
 import {
+  Alert,
   Button,
   Divider,
   Form,
@@ -20,8 +21,7 @@ import {
   Switch,
   Tag,
   Tooltip,
-  Typography,
-  message
+  Typography
 } from 'antd';
 import { ProCard, ProForm, ProFormDigit, ProFormSelect, ProFormTextArea, ProTable, StatisticCard } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
@@ -33,6 +33,7 @@ import { api, defaultScreeningRequest } from '../api/modules';
 import { useAppStore } from '../store/useAppStore';
 import type { IndexMeta, OneClickRecommendResponse, ScreeningRequest, ScreeningResult, StockDetail, StockScore, WorkflowInfo, WorkbenchMode } from '../types';
 import { runSafely } from '../utils/async';
+import { notifySuccess } from '../utils/feedback';
 
 const ratingColor: Record<string, string> = {
   A: 'green',
@@ -43,6 +44,24 @@ const ratingColor: Record<string, string> = {
 
 type BeginnerPreset = 'balanced' | 'value' | 'growth' | 'sentiment';
 type RecommendRisk = 'conservative' | 'balanced' | 'aggressive';
+
+function diagnosticsDescription(result: ScreeningResult): string {
+  const diagnostics = result.diagnostics;
+  if (!diagnostics) return '后端未返回筛选诊断信息。';
+  const excluded = Object.entries(diagnostics.excluded_counts)
+    .filter(([, count]) => count > 0)
+    .map(([name, count]) => `${name}${count}只`)
+    .join('，');
+  const warnings = diagnostics.warnings.join(' ');
+  return [
+    `股票池${diagnostics.stock_universe_count}只，因子池${diagnostics.factor_universe_count}只，基础过滤后${diagnostics.base_universe_count}只。`,
+    diagnostics.condition_count > 0 ? `本次应用${diagnostics.condition_count}个筛选条件，命中${diagnostics.matched_count}只。` : `本次没有启用具体因子条件，命中${diagnostics.matched_count}只。`,
+    excluded ? `基础过滤剔除：${excluded}。` : '',
+    warnings
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
 
 function normalizeRequest(values: Partial<ScreeningRequest>): ScreeningRequest {
   return {
@@ -217,7 +236,7 @@ const Workbench = () => {
     setResult(data);
     setLatestResult(data);
     setSelected(data.rows[0] ?? null);
-    message.success(`选股完成：命中 ${data.total} 只`);
+    notifySuccess(`选股完成：命中 ${data.total} 只`);
   }
 
   async function parseAiText(): Promise<void> {
@@ -232,7 +251,7 @@ const Workbench = () => {
       await run(workflow.parsed_request);
     }
     const view = workflow.llm_analysis.market_view;
-    message.success(typeof view === 'string' ? view : `Workflow执行完成：${workflow.workflow_name}`);
+    notifySuccess(typeof view === 'string' ? view : `Workflow执行完成：${workflow.workflow_name}`);
   }
 
   function reset(): void {
@@ -274,7 +293,7 @@ const Workbench = () => {
       schedule_cron: values.schedule_cron
     });
     setSaveOpen(false);
-    message.success('策略已保存');
+    notifySuccess('策略已保存');
   }
 
   async function addToWatchlist(record: StockScore, event?: MouseEvent<HTMLElement>): Promise<void> {
@@ -287,7 +306,7 @@ const Workbench = () => {
       priority: record.rating === 'A' ? 5 : record.rating === 'B' ? 4 : 3,
       risk_level: record.sentiment_score < 45 ? 'high' : 'medium'
     });
-    message.success(`${record.name} 已加入自选股`);
+    notifySuccess(`${record.name} 已加入自选股`);
   }
 
   async function oneClickRecommend(): Promise<void> {
@@ -297,7 +316,7 @@ const Workbench = () => {
       include_search: true
     });
     setRecommendation(data);
-    message.success('一键研究推荐完成');
+    notifySuccess('一键研究推荐完成');
   }
 
   return (
@@ -475,6 +494,14 @@ const Workbench = () => {
             </div>
           </Space>
         </ProCard>
+        {result?.diagnostics ? (
+          <Alert
+            showIcon
+            type={result.diagnostics.warnings.length ? 'warning' : 'info'}
+            message={`筛选诊断：返回 ${result.diagnostics.returned_count} / 命中 ${result.diagnostics.matched_count}`}
+            description={diagnosticsDescription(result)}
+          />
+        ) : null}
         {recommendation ? (
           <ProCard bordered title={`一键荐股 · ${recommendation.risk_preference}`}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -529,7 +556,7 @@ const Workbench = () => {
           <FactorCharts result={result} stockDetail={stockDetail} />
         </ProCard>
       </Space>
-      <Modal title="保存当前策略" open={saveOpen} onCancel={() => setSaveOpen(false)} onOk={() => runSafely(saveStrategy())} destroyOnClose>
+      <Modal title="保存当前策略" open={saveOpen} onCancel={() => setSaveOpen(false)} onOk={() => runSafely(saveStrategy())} destroyOnHidden>
         <ProForm form={saveForm} submitter={false} layout="vertical" initialValues={{ schedule_enabled: false, schedule_cron: '30 18 * * 1-5' }}>
           <ProFormTextArea name="name" label="策略名称" rules={[{ required: true, message: '请输入策略名称' }]} fieldProps={{ autoSize: { minRows: 1, maxRows: 1 } }} />
           <ProFormTextArea name="remark" label="备注" fieldProps={{ autoSize: { minRows: 2, maxRows: 3 } }} />

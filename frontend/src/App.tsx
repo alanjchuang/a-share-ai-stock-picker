@@ -8,14 +8,10 @@ const App = () => {
   const themeMode = useAppStore((state) => state.themeMode);
   return (
     <div className={`app-shell ${themeMode}`}>
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
         <AppRouter />
       </BrowserRouter>
-      {globalLoading ? (
-        <div className="global-loading">
-          <Spin tip="数据处理中" />
-        </div>
-      ) : null}
+      {globalLoading ? <Spin fullscreen tip="数据处理中" /> : null}
     </div>
   );
 };

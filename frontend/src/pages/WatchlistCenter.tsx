@@ -1,5 +1,5 @@
 import { DeleteOutlined, EditOutlined, MessageOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Form, Input, Modal, Popconfirm, Segmented, Space, Switch, Tag, Typography, message } from 'antd';
+import { Button, Form, Input, Modal, Popconfirm, Segmented, Space, Switch, Tag, Typography } from 'antd';
 import { PageContainer, ProCard, ProForm, ProFormDigit, ProFormSelect, ProFormText, ProFormTextArea, ProTable, StatisticCard } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
 import { useEffect, useMemo, useState } from 'react';
@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/modules';
 import type { WatchlistAskResponse, WatchlistGroup, WatchlistItem } from '../types';
 import { runSafely } from '../utils/async';
+import { notifySuccess } from '../utils/feedback';
 
 interface WatchlistFormValue {
   ts_code: string;
@@ -162,10 +163,10 @@ const WatchlistCenter = () => {
     const values = await form.validateFields();
     if (editing) {
       await api.updateWatchlistItem(editing.id, values);
-      message.success('自选股已更新');
+      notifySuccess('自选股已更新');
     } else {
       await api.addWatchlistItem(values);
-      message.success('已加入自选股');
+      notifySuccess('已加入自选股');
     }
     setModalOpen(false);
     await loadGroups();
@@ -175,7 +176,7 @@ const WatchlistCenter = () => {
 
   async function remove(id: number): Promise<void> {
     await api.deleteWatchlistItem(id);
-    message.success('已移除自选股');
+    notifySuccess('已移除自选股');
     await loadGroups();
     await loadItems();
   }
@@ -183,7 +184,7 @@ const WatchlistCenter = () => {
   async function ask(): Promise<void> {
     const result = await api.askWatchlist({ question, group_id: selectedGroupId, include_search: includeSearch });
     setAnswer(result);
-    message.success(result.source === 'llm' ? 'AI复盘完成' : '规则复盘完成');
+    notifySuccess(result.source === 'llm' ? 'AI复盘完成' : '规则复盘完成');
   }
 
   const avgScore = items.reduce((sum, item) => sum + Number(item.stock?.ai_score ?? 0), 0) / Math.max(1, items.length);
@@ -255,7 +256,7 @@ const WatchlistCenter = () => {
           pagination={{ pageSize: 10, showSizeChanger: true }}
         />
       </Space>
-      <Modal title={editing ? '编辑自选股' : '加入自选股'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => runSafely(submit())} destroyOnClose>
+      <Modal title={editing ? '编辑自选股' : '加入自选股'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => runSafely(submit())} destroyOnHidden>
         <ProForm<WatchlistFormValue> form={form} submitter={false} layout="vertical">
           <ProFormText name="ts_code" label="股票代码" disabled={Boolean(editing)} rules={[{ required: true, message: '请输入股票代码，如 600519.SH' }]} />
           <ProFormSelect name="group_id" label="分组" options={groupOptions} rules={[{ required: true, message: '请选择分组' }]} />

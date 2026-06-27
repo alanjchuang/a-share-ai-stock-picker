@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from app.core.config import load_settings
-from app.models.schemas import RangeFilter, ScreeningRequest, ScreeningResult, StockScore
+from app.models.schemas import RangeFilter, ScreeningDiagnostics, ScreeningRequest, ScreeningResult, StockScore
 from app.services.data_repository import DataRepository
 from app.services.factor_engine import FactorEngine
 
@@ -19,7 +19,17 @@ class ScreenerService:
 
     def run(self, request: ScreeningRequest) -> ScreeningResult:
         rows = self.factor_engine.factor_rows()
-        base_filtered = [row for row in rows if self._pass_base_filters(row, request)]
+        base_filtered: list[dict[str, Any]] = []
+        excluded_counts: Counter[str] = Counter()
+        missing_list_date_count = 0
+        for row in rows:
+            passed, reason = self._base_filter_result(row, request)
+            if passed:
+                base_filtered.append(row)
+                if reason == "missing_list_date":
+                    missing_list_date_count += 1
+            elif reason:
+                excluded_counts[reason] += 1
 
         conditions: list[Callable[[dict[str, Any]], bool]] = []
         index_condition = self._index_condition(request)
@@ -43,6 +53,8 @@ class ScreenerService:
         matched.sort(key=lambda item: float(item.get("ai_score") or 0), reverse=True)
         limited = matched[: request.limit]
         stock_rows = [self._to_stock_score(row) for row in limited]
+        warnings = self._diagnostic_warnings(request, rows, missing_list_date_count)
+        stock_count = self.conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
         return ScreeningResult(
             total=len(matched),
             rows=stock_rows,
@@ -56,9 +68,22 @@ class ScreenerService:
                 "ai": [row.ai_score for row in stock_rows],
             },
             latest_trade_date=self.repo.latest_trade_date(),
+            diagnostics=ScreeningDiagnostics(
+                stock_universe_count=int(stock_count or 0),
+                factor_universe_count=len(rows),
+                base_universe_count=len(base_filtered),
+                condition_count=len(conditions),
+                matched_count=len(matched),
+                returned_count=len(stock_rows),
+                excluded_counts=dict(excluded_counts),
+                warnings=warnings,
+            ),
         )
 
     def _pass_base_filters(self, row: dict[str, Any], request: ScreeningRequest) -> bool:
+        return self._base_filter_result(row, request)[0]
+
+    def _base_filter_result(self, row: dict[str, Any], request: ScreeningRequest) -> tuple[bool, str | None]:
         settings = load_settings()
         exclude_st = request.filters.exclude_st if request.filters.exclude_st is not None else settings.filters.exclude_st
         exclude_paused = request.filters.exclude_paused if request.filters.exclude_paused is not None else settings.filters.exclude_paused
@@ -66,20 +91,32 @@ class ScreenerService:
         min_market_cap = request.filters.min_market_cap if request.filters.min_market_cap is not None else settings.filters.min_market_cap
 
         if exclude_st and int(row.get("is_st") or 0):
-            return False
+            return False, "ST/*ST"
         if exclude_paused and int(row.get("is_paused") or 0):
-            return False
+            return False, "停牌"
         if min_market_cap and float(row.get("total_mv") or 0) < min_market_cap:
-            return False
+            return False, "低于最小市值"
         if new_stock_days:
             list_date = str(row.get("list_date") or "")
             try:
                 listed_days = (datetime.now() - datetime.strptime(list_date, "%Y%m%d")).days
                 if listed_days < new_stock_days:
-                    return False
+                    return False, "次新股"
             except ValueError:
-                return False
-        return True
+                # AKShare部分行情接口不会提供上市日期。缺失时保留股票，并通过诊断提示用户该过滤条件无法覆盖这些标的。
+                return True, "missing_list_date"
+        return True, None
+
+    @staticmethod
+    def _diagnostic_warnings(request: ScreeningRequest, rows: list[dict[str, Any]], missing_list_date_count: int) -> list[str]:
+        warnings: list[str] = []
+        if request.filters.new_stock_days and missing_list_date_count:
+            warnings.append(
+                f"有 {missing_list_date_count} 只股票缺少上市日期，已保留参与筛选；次新股过滤仅对有上市日期的股票生效。"
+            )
+        if not rows:
+            warnings.append("当前没有可用因子缓存，请先在系统配置中同步行情或重算因子。")
+        return warnings
 
     def _index_condition(self, request: ScreeningRequest) -> Callable[[dict[str, Any]], bool] | None:
         index_codes = request.index.index_codes[:]

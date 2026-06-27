@@ -118,6 +118,17 @@ class StockScore(BaseModel):
     metrics: dict[str, float | str | None] = Field(default_factory=dict)
 
 
+class ScreeningDiagnostics(BaseModel):
+    stock_universe_count: int = 0
+    factor_universe_count: int = 0
+    base_universe_count: int = 0
+    condition_count: int = 0
+    matched_count: int = 0
+    returned_count: int = 0
+    excluded_counts: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ScreeningResult(BaseModel):
     total: int
     rows: list[StockScore]
@@ -125,6 +136,7 @@ class ScreeningResult(BaseModel):
     sentiment_distribution: dict[str, int]
     factor_distribution: dict[str, list[float]]
     latest_trade_date: str | None = None
+    diagnostics: ScreeningDiagnostics = Field(default_factory=ScreeningDiagnostics)
 
 
 class NewsAnalyzeRequest(BaseModel):

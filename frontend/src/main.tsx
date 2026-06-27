@@ -1,10 +1,19 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { App as AntApp, ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import App from './App';
 import { useAppStore } from './store/useAppStore';
+import { setMessageApi } from './utils/feedback';
 import './styles/global.less';
+
+const MessageBridge = () => {
+  const { message } = AntApp.useApp();
+  useEffect(() => {
+    setMessageApi(message);
+  }, [message]);
+  return null;
+};
 
 const Root = () => {
   const themeMode = useAppStore((state) => state.themeMode);
@@ -22,6 +31,7 @@ const Root = () => {
       }}
     >
       <AntApp>
+        <MessageBridge />
         <App />
       </AntApp>
     </ConfigProvider>
