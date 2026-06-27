@@ -68,20 +68,11 @@ class StockSelectionWorkflow:
 
     def run(self, request: WorkflowRunRequest) -> StockSelectionWorkflowResult:
         if not self.settings.workflow.enabled:
-            parsed = self.parser.parse(request.text)
-            screening = self.screener.run(parsed)
-            return StockSelectionWorkflowResult(
-                workflow_name="disabled_workflow_fallback",
-                workflow_path="",
-                parsed_request=parsed,
-                screening_result=screening,
-                llm_analysis=self._deterministic_summary(request.text, parsed, screening),
-                raw_conditions=parsed.model_dump(mode="json"),
-                steps=[],
-            )
+            raise RuntimeError("AI解析选股需要先完成配置：Workflow 未启用，请在系统配置启用 Workflow")
 
         workflow_path = request.workflow_path or self.settings.workflow.default_path or self._default_workflow_path()
         config = self._load_workflow_config(workflow_path)
+        self._validate_ready(config)
         context: dict[str, Any] = {"user_text": request.text}
         traces: list[WorkflowStepTrace] = []
 
@@ -96,6 +87,11 @@ class StockSelectionWorkflow:
                 context[output_key] = output
                 traces.append(self._trace(step, status, summary, output, started=started))
             except Exception as exc:
+                if str(step.get("type") or "").startswith("llm_"):
+                    traces.append(self._trace(step, "failed", str(exc), {}, started=started))
+                    raise RuntimeError(
+                        f"AI解析选股失败：{step.get('name') or step.get('id')} 调用失败，请检查 LLM API Key、模型名和接口权限：{exc}"
+                    ) from exc
                 fallback = str(step.get("fallback") or "")
                 if fallback:
                     output, summary = self._fallback(step, fallback, context, exc)
@@ -107,7 +103,9 @@ class StockSelectionWorkflow:
 
         parsed_request = context.get("screening_request")
         if not isinstance(parsed_request, ScreeningRequest):
-            raw = context.get("raw_conditions") or self.parser._heuristic_parse(request.text).model_dump(mode="json")
+            raw = context.get("raw_conditions")
+            if raw is None:
+                raise RuntimeError("AI解析选股失败：Workflow 未生成结构化筛选条件，请检查 Workflow 步骤配置")
             parsed_request = self._build_request(raw, request.text)
         screening_result = context.get("screening_result")
         if screening_result is not None and not isinstance(screening_result, ScreeningResult):
@@ -128,6 +126,16 @@ class StockSelectionWorkflow:
             raw_conditions=self._as_dict(context.get("raw_conditions") or parsed_request.model_dump(mode="json")),
             steps=traces,
         )
+
+    def _validate_ready(self, config: dict[str, Any]) -> None:
+        enabled_step_types = {str(step.get("type") or "") for step in config.get("steps", []) if step.get("enabled", True)}
+        missing: list[str] = []
+        if "llm_intent_parse" not in enabled_step_types:
+            missing.append("Workflow 缺少启用的 LLM 自然语言解析步骤")
+        if any(step_type.startswith("llm_") for step_type in enabled_step_types) and not self.llm.available:
+            missing.append("LLM 未配置，请在系统配置填写 Provider、API 地址、API Key 和模型名")
+        if missing:
+            raise RuntimeError("AI解析选股需要先完成配置：" + "；".join(missing))
 
     def _run_step(self, step: dict[str, Any], config: dict[str, Any], context: dict[str, Any]) -> tuple[Any, str, str]:
         step_type = str(step.get("type") or "")
@@ -199,18 +207,9 @@ class StockSelectionWorkflow:
 
     def _fallback(self, step: dict[str, Any], fallback: str, context: dict[str, Any], exc: Exception) -> tuple[Any, str]:
         if fallback == "heuristic_parse":
-            parsed = self.parser._heuristic_parse(str(context.get("user_text") or ""))
-            if str(step.get("output_key") or "") == "screening_request":
-                return parsed, f"条件校验失败，已回退规则解析：{exc}"
-            return parsed.model_dump(mode="json"), f"LLM解析失败，已回退规则解析：{exc}"
+            raise RuntimeError(f"AI解析选股失败：LLM输出条件无法校验，已停止规则解析兜底：{exc}") from exc
         if fallback == "deterministic_summary":
-            parsed = context.get("screening_request")
-            if not isinstance(parsed, ScreeningRequest):
-                parsed = self._build_request(context.get("raw_conditions"), str(context.get("user_text") or ""))
-            screening = context.get("screening_result")
-            if not isinstance(screening, ScreeningResult):
-                screening = self.screener.run(parsed)
-            return self._deterministic_summary(str(context.get("user_text") or ""), parsed, screening), f"LLM复核失败，已生成确定性摘要：{exc}"
+            raise RuntimeError(f"AI解析选股失败：候选股复核模型调用失败，已停止确定性摘要兜底：{exc}") from exc
         if fallback == "empty_search_context":
             return self._empty_search_context(f"联网搜索失败：{exc}"), f"火山搜索失败，已跳过联网上下文：{exc}"
         raise exc
@@ -219,7 +218,7 @@ class StockSelectionWorkflow:
         if isinstance(raw, ScreeningRequest):
             return raw
         if not isinstance(raw, dict):
-            return self.parser._heuristic_parse(user_text)
+            raise ValueError("LLM结构化条件为空或格式错误")
         data = raw.copy()
         if user_text:
             data = self._merge_missing(data, self.parser._heuristic_parse(user_text).model_dump(mode="json"))

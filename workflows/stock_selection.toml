@@ -8,7 +8,6 @@ id = "intent_parser"
 name = "自然语言条件解析"
 type = "llm_intent_parse"
 enabled = true
-fallback = "heuristic_parse"
 output_key = "raw_conditions"
 prompt = """
 你是A股量化选股条件解析 Agent。把用户的自然语言选股需求转换为严格 JSON。
@@ -44,7 +43,6 @@ id = "condition_guard"
 name = "条件校验与风控补全"
 type = "condition_guard"
 enabled = true
-fallback = "heuristic_parse"
 output_key = "screening_request"
 
 [[steps]]
@@ -73,7 +71,6 @@ id = "candidate_reviewer"
 name = "候选股大模型复核"
 type = "llm_candidate_review"
 enabled = true
-fallback = "deterministic_summary"
 candidate_limit = 20
 output_key = "llm_analysis"
 prompt = """

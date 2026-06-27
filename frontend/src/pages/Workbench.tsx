@@ -63,9 +63,9 @@ function diagnosticsDescription(result: ScreeningResult): string {
     .join(' ');
 }
 
-function getRequestErrorMessage(error: unknown): string {
+function getRequestErrorMessage(error: unknown, fallbackMessage: string): string {
   const maybeError = error as { response?: { data?: { message?: string } }; message?: string };
-  return maybeError.response?.data?.message || maybeError.message || '一键荐股执行失败，请检查系统配置。';
+  return maybeError.response?.data?.message || maybeError.message || fallbackMessage;
 }
 
 function normalizeRequest(values: Partial<ScreeningRequest>): ScreeningRequest {
@@ -111,6 +111,7 @@ const Workbench = () => {
   const [recommendRisk, setRecommendRisk] = useState<RecommendRisk>('balanced');
   const [recommendation, setRecommendation] = useState<OneClickRecommendResponse | null>(null);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
+  const [aiParseError, setAiParseError] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [selectedWorkflowPath, setSelectedWorkflowPath] = useState<string | undefined>();
   const [saveOpen, setSaveOpen] = useState(false);
@@ -235,6 +236,8 @@ const Workbench = () => {
   ];
 
   async function run(values?: Partial<ScreeningRequest>): Promise<void> {
+    setAiParseError(null);
+    setRecommendationError(null);
     const request = normalizeRequest(values ?? form.getFieldsValue(true));
     form.setFieldsValue(request);
     setCurrentRequest(request);
@@ -246,18 +249,25 @@ const Workbench = () => {
   }
 
   async function parseAiText(): Promise<void> {
-    const workflow = await api.runSelectionWorkflow(aiText, selectedWorkflowPath);
-    form.setFieldsValue(workflow.parsed_request);
-    setCurrentRequest(workflow.parsed_request);
-    if (workflow.screening_result) {
-      setResult(workflow.screening_result);
-      setLatestResult(workflow.screening_result);
-      setSelected(workflow.screening_result.rows[0] ?? null);
-    } else {
-      await run(workflow.parsed_request);
+    setAiParseError(null);
+    setRecommendationError(null);
+    try {
+      const workflow = await api.runSelectionWorkflow(aiText, selectedWorkflowPath);
+      form.setFieldsValue(workflow.parsed_request);
+      setCurrentRequest(workflow.parsed_request);
+      if (workflow.screening_result) {
+        setResult(workflow.screening_result);
+        setLatestResult(workflow.screening_result);
+        setSelected(workflow.screening_result.rows[0] ?? null);
+      } else {
+        await run(workflow.parsed_request);
+      }
+      const view = workflow.llm_analysis.market_view;
+      notifySuccess(typeof view === 'string' ? view : `Workflow执行完成：${workflow.workflow_name}`);
+    } catch (error) {
+      setAiParseError(getRequestErrorMessage(error, 'AI解析选股失败，请先检查 LLM 与 Workflow 配置。'));
+      throw error;
     }
-    const view = workflow.llm_analysis.market_view;
-    notifySuccess(typeof view === 'string' ? view : `Workflow执行完成：${workflow.workflow_name}`);
   }
 
   function reset(): void {
@@ -316,6 +326,7 @@ const Workbench = () => {
   }
 
   async function oneClickRecommend(): Promise<void> {
+    setAiParseError(null);
     setRecommendationError(null);
     setRecommendation(null);
     try {
@@ -327,7 +338,7 @@ const Workbench = () => {
       setRecommendation(data);
       notifySuccess('一键研究推荐完成');
     } catch (error) {
-      setRecommendationError(getRequestErrorMessage(error));
+      setRecommendationError(getRequestErrorMessage(error, '一键荐股执行失败，请检查系统配置。'));
       throw error;
     }
   }
@@ -519,6 +530,19 @@ const Workbench = () => {
             type={result.diagnostics.warnings.length ? 'warning' : 'info'}
             message={`筛选诊断：返回 ${result.diagnostics.returned_count} / 命中 ${result.diagnostics.matched_count}`}
             description={diagnosticsDescription(result)}
+          />
+        ) : null}
+        {aiParseError ? (
+          <Alert
+            showIcon
+            type="warning"
+            message={aiParseError.includes('需要先完成配置') ? 'AI解析选股需要先完成配置' : 'AI解析选股失败'}
+            description={aiParseError}
+            action={
+              <Button size="small" type="primary" onClick={() => navigate('/config')}>
+                去配置
+              </Button>
+            }
           />
         ) : null}
         {recommendationError ? (

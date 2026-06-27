@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 @router.post("/parse", response_model=ApiResponse[ScreeningRequest])
 def parse(payload: NaturalLanguageRequest) -> ApiResponse[ScreeningRequest]:
-    return ok(NaturalLanguageParser().parse(payload.text))
+    return ok(NaturalLanguageParser().parse_ai(payload.text))
 
 
 @router.get("/workflows", response_model=ApiResponse[list[dict[str, object]]])

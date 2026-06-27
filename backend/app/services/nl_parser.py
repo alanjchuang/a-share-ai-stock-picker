@@ -35,12 +35,21 @@ INDEX_ALIASES = {
 class NaturalLanguageParser:
     def parse(self, text: str) -> ScreeningRequest:
         settings = load_settings()
-        if settings.llm.provider != "heuristic" and settings.llm.api_base and settings.llm.api_key:
+        if LlmClient(settings.llm).available:
             try:
                 return self._llm_parse(text)
             except Exception:
                 return self._heuristic_parse(text)
         return self._heuristic_parse(text)
+
+    def parse_ai(self, text: str) -> ScreeningRequest:
+        settings = load_settings()
+        if not LlmClient(settings.llm).available:
+            raise RuntimeError("AI解析选股需要先完成配置：LLM 未配置，请在系统配置填写 Provider、API 地址、API Key 和模型名")
+        try:
+            return self._llm_parse(text)
+        except Exception as exc:
+            raise RuntimeError(f"AI解析选股失败：LLM调用或JSON解析失败，请检查API Key、模型名和接口地址后重试：{exc}") from exc
 
     def _heuristic_parse(self, text: str) -> ScreeningRequest:
         data: dict[str, Any] = {
