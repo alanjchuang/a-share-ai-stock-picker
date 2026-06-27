@@ -390,7 +390,12 @@ def _stock_detail_refresh_task(ts_code: str) -> JobTask:
         check_cancel()
 
         _update_job(conn, job_id, "running", f"正在重算 {normalized} 的最新因子评分。")
-        factor_row = FactorEngine(conn).calculate_one(normalized, cancel_check=check_cancel)
+        factor_engine = FactorEngine(conn)
+        if quality_result.get("factor_cache_cleared"):
+            factor_rows = factor_engine.calculate_all(force=True, cancel_check=check_cancel)
+            factor_row = next((row for row in factor_rows if row.get("ts_code") == normalized), {})
+        else:
+            factor_row = factor_engine.calculate_one(normalized, cancel_check=check_cancel)
         return {
             "sync": sync_result,
             "search": search_result,

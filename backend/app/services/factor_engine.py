@@ -36,6 +36,12 @@ def _write_factor_rows_cache(rows: list[dict[str, Any]]) -> None:
         _factor_rows_cache = _clone_factor_rows(rows)
 
 
+def clear_factor_rows_cache() -> None:
+    global _factor_rows_cache
+    with _factor_rows_lock:
+        _factor_rows_cache = None
+
+
 class FactorEngine:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn

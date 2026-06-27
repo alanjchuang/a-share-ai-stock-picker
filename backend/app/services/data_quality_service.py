@@ -25,6 +25,9 @@ class DataQualityService:
         if deleted_total:
             self.conn.execute("DELETE FROM computed_factors")
             self.conn.commit()
+            from app.services.factor_engine import clear_factor_rows_cache
+
+            clear_factor_rows_cache()
         return {
             "skipped": False,
             "deleted_daily": deleted_total,
