@@ -173,6 +173,16 @@ CREATE TABLE IF NOT EXISTS watchlist_notes (
     FOREIGN KEY(item_id) REFERENCES watchlist_items(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS analysis_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_type TEXT NOT NULL DEFAULT 'daily',
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    payload_json TEXT DEFAULT '',
+    source TEXT DEFAULT 'deterministic',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS sync_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_type TEXT NOT NULL,

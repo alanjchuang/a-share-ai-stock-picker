@@ -239,6 +239,15 @@ export interface PatternRadarResponse {
   distribution: Record<string, number>;
 }
 
+export interface AnalysisReportOut {
+  id: number;
+  report_type: string;
+  title: string;
+  content: string;
+  source: string;
+  created_at: string;
+}
+
 export interface ScreeningResult {
   total: number;
   rows: StockScore[];

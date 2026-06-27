@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import AppLayout from '../layout/AppLayout';
 import DecisionDashboard from '../pages/DecisionDashboard';
 import PatternRadar from '../pages/PatternRadar';
+import ReportCenter from '../pages/ReportCenter';
 import StockDetail from '../pages/StockDetail';
 import StockMarket from '../pages/StockMarket';
 import StrategyLab from '../pages/StrategyLab';
@@ -55,6 +56,14 @@ const AppRouter = () => (
         element={
           <ProtectedRoute>
             <StockMarket />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute>
+            <ReportCenter />
           </ProtectedRoute>
         }
       />

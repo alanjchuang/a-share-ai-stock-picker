@@ -158,6 +158,53 @@ body {
   gap: 12px;
 }
 
+.report-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.report-list {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+
+.report-list-item {
+  padding: 10px 8px !important;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.report-list-item.active {
+  background: #e8f4f7;
+}
+
+.dark .report-list-item.active {
+  background: #1d343b;
+}
+
+.report-markdown {
+  min-height: 520px;
+  max-height: calc(100vh - 280px);
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f7fafb;
+  border: 1px solid #d8e0e4;
+  border-radius: 8px;
+}
+
+.dark .report-markdown {
+  background: #121820;
+  border-color: #2b333b;
+}
+
 .score-badge {
   min-width: 54px;
   font-weight: 700;
@@ -200,6 +247,10 @@ body {
   }
 
   .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .report-layout {
     grid-template-columns: 1fr;
   }
 

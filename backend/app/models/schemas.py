@@ -226,6 +226,15 @@ class PatternRadarResponse(BaseModel):
     distribution: dict[str, int] = Field(default_factory=dict)
 
 
+class AnalysisReportOut(BaseModel):
+    id: int
+    report_type: str
+    title: str
+    content: str
+    source: str = "deterministic"
+    created_at: str
+
+
 class ScreeningDiagnostics(BaseModel):
     stock_universe_count: int = 0
     factor_universe_count: int = 0

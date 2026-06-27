@@ -1,6 +1,7 @@
 import { request } from './http';
 import type {
   AppConfig,
+  AnalysisReportOut,
   BackgroundJobResponse,
   DecisionDashboardResponse,
   IndexMeta,
@@ -102,6 +103,9 @@ export const api = {
     request<StrategyScanResponse>({ url: `/analysis/strategies/${encodeURIComponent(strategyKey)}`, method: 'GET', params }),
   getPatternRadar: (params?: { limit?: number; signal?: 'bullish' | 'bearish' | 'neutral' | 'all' }) =>
     request<PatternRadarResponse>({ url: '/analysis/patterns', method: 'GET', params }),
+  listReports: (limit = 30) => request<AnalysisReportOut[]>({ url: '/reports', method: 'GET', params: { limit } }),
+  generateDailyReport: () => request<AnalysisReportOut>({ url: '/reports/daily', method: 'POST' }),
+  getReport: (id: number) => request<AnalysisReportOut>({ url: `/reports/${id}`, method: 'GET' }),
   runScreener: (data: ScreeningRequest) => request<ScreeningResult>({ url: '/screener/run', method: 'POST', data }),
   parseText: (text: string) => request<ScreeningRequest>({ url: '/ai/parse', method: 'POST', data: { text } }),
   oneClickRecommend: (data: { risk_preference: 'conservative' | 'balanced' | 'aggressive'; limit?: number; include_search?: boolean; focus_themes?: string[] }) =>

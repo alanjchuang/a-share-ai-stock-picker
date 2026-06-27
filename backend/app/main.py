@@ -12,7 +12,7 @@ from app.core.config import load_settings
 from app.core.rate_limit import SimpleRateLimitMiddleware
 from app.db.database import get_connection, init_db
 from app.db.seed import ensure_demo_data
-from app.routers import ai, analysis, config, factors, health, meta, screener, stocks, strategies, sync, watchlists
+from app.routers import ai, analysis, config, factors, health, meta, reports, screener, stocks, strategies, sync, watchlists
 from app.services.factor_engine import FactorEngine
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 
@@ -59,6 +59,7 @@ app.include_router(factors.router)
 app.include_router(screener.router)
 app.include_router(ai.router)
 app.include_router(analysis.router)
+app.include_router(reports.router)
 app.include_router(strategies.router)
 app.include_router(stocks.router)
 app.include_router(watchlists.router)
