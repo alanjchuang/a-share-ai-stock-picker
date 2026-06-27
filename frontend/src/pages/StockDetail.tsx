@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/modules';
 import type { StockDetail as StockDetailType } from '../types';
+import { runSafely } from '../utils/async';
 
 function klineOption(detail: StockDetailType): EChartsOption {
   const dates = detail.kline.map((item) => item.trade_date);
@@ -57,7 +58,7 @@ const StockDetail = () => {
   const [detail, setDetail] = useState<StockDetailType | null>(null);
 
   const load = () => {
-    if (tsCode) void api.getStockDetail(tsCode).then(setDetail);
+    if (tsCode) runSafely(api.getStockDetail(tsCode).then(setDetail));
   };
 
   useEffect(load, [tsCode]);
@@ -98,7 +99,7 @@ const StockDetail = () => {
         <Button key="refresh" icon={<ReloadOutlined />} onClick={load}>
           刷新
         </Button>,
-        <Button key="watch" type="primary" icon={<StarOutlined />} onClick={() => void addToWatchlist()} disabled={!detail}>
+        <Button key="watch" type="primary" icon={<StarOutlined />} onClick={() => runSafely(addToWatchlist())} disabled={!detail}>
           加入自选
         </Button>
       ]}

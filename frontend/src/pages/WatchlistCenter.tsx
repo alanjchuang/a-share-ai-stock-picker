@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/modules';
 import type { WatchlistAskResponse, WatchlistGroup, WatchlistItem } from '../types';
+import { runSafely } from '../utils/async';
 
 interface WatchlistFormValue {
   ts_code: string;
@@ -56,11 +57,11 @@ const WatchlistCenter = () => {
   };
 
   useEffect(() => {
-    void loadGroups().then((data) => loadItems(data[0]?.id));
+    runSafely(loadGroups().then((data) => loadItems(data[0]?.id)));
   }, []);
 
   useEffect(() => {
-    if (selectedGroupId) void loadItems(selectedGroupId);
+    if (selectedGroupId) runSafely(loadItems(selectedGroupId));
   }, [selectedGroupId]);
 
   const columns: ProColumns<WatchlistItem>[] = [
@@ -114,7 +115,7 @@ const WatchlistCenter = () => {
         <Button key="edit" type="link" icon={<EditOutlined />} onClick={() => openEdit(record)}>
           编辑
         </Button>,
-        <Popconfirm key="delete" title="移除自选股？" onConfirm={() => void remove(record.id)}>
+        <Popconfirm key="delete" title="移除自选股？" onConfirm={() => runSafely(remove(record.id))}>
           <Button type="link" danger icon={<DeleteOutlined />}>
             移除
           </Button>
@@ -223,7 +224,7 @@ const WatchlistCenter = () => {
               <Space>
                 <Typography.Text type="secondary">联网资料</Typography.Text>
                 <Switch checked={includeSearch} onChange={setIncludeSearch} />
-                <Button type="primary" icon={<MessageOutlined />} onClick={() => void ask()}>
+                <Button type="primary" icon={<MessageOutlined />} onClick={() => runSafely(ask())}>
                   询问
                 </Button>
               </Space>
@@ -254,7 +255,7 @@ const WatchlistCenter = () => {
           pagination={{ pageSize: 10, showSizeChanger: true }}
         />
       </Space>
-      <Modal title={editing ? '编辑自选股' : '加入自选股'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => void submit()} destroyOnClose>
+      <Modal title={editing ? '编辑自选股' : '加入自选股'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => runSafely(submit())} destroyOnClose>
         <ProForm<WatchlistFormValue> form={form} submitter={false} layout="vertical">
           <ProFormText name="ts_code" label="股票代码" disabled={Boolean(editing)} rules={[{ required: true, message: '请输入股票代码，如 600519.SH' }]} />
           <ProFormSelect name="group_id" label="分组" options={groupOptions} rules={[{ required: true, message: '请选择分组' }]} />

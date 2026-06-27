@@ -30,7 +30,7 @@ const AppRouter = () => (
           </ProtectedRoute>
         }
       />
-      <Route path="/stock" element={<Navigate to="/" replace />} />
+      <Route path="/stock" element={<Navigate to="/stock/000001.SZ" replace />} />
       <Route
         path="/strategies"
         element={

@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, defaultScreeningRequest } from '../api/modules';
 import { useAppStore } from '../store/useAppStore';
 import type { ScreeningRequest, StrategyOut } from '../types';
+import { runSafely } from '../utils/async';
 
 interface StrategyFormValue {
   name: string;
@@ -26,7 +27,7 @@ const StrategyManager = () => {
   const setCurrentRequest = useAppStore((state) => state.setCurrentRequest);
   const setLatestResult = useAppStore((state) => state.setLatestResult);
 
-  const load = () => void api.listStrategies().then(setStrategies);
+  const load = () => runSafely(api.listStrategies().then(setStrategies));
 
   useEffect(load, []);
 
@@ -64,13 +65,13 @@ const StrategyManager = () => {
       valueType: 'option',
       width: 220,
       render: (_, record) => [
-        <Button key="run" type="link" icon={<PlayCircleOutlined />} onClick={() => void runStrategy(record)}>
+        <Button key="run" type="link" icon={<PlayCircleOutlined />} onClick={() => runSafely(runStrategy(record))}>
           执行
         </Button>,
         <Button key="edit" type="link" icon={<EditOutlined />} onClick={() => openEdit(record)}>
           编辑
         </Button>,
-        <Popconfirm key="delete" title="删除策略？" onConfirm={() => void api.deleteStrategy(record.id).then(load)}>
+        <Popconfirm key="delete" title="删除策略？" onConfirm={() => runSafely(api.deleteStrategy(record.id).then(load))}>
           <Button type="link" danger icon={<DeleteOutlined />}>
             删除
           </Button>
@@ -129,7 +130,7 @@ const StrategyManager = () => {
         </ProCard>
         <ProTable<StrategyOut> rowKey="id" search={false} options={false} columns={columns} dataSource={strategies} pagination={{ pageSize: 10 }} cardBordered />
       </Space>
-      <Modal title={editing ? '编辑策略' : '新建策略'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => void submit()} destroyOnClose>
+      <Modal title={editing ? '编辑策略' : '新建策略'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => runSafely(submit())} destroyOnClose>
         <ProForm form={form} submitter={false} layout="vertical">
           <ProFormTextArea name="name" label="策略名称" rules={[{ required: true, message: '请输入策略名称' }]} fieldProps={{ autoSize: { minRows: 1, maxRows: 1 } }} />
           <ProFormTextArea name="remark" label="备注" fieldProps={{ autoSize: { minRows: 2, maxRows: 4 } }} />

@@ -4,14 +4,15 @@ import { PageContainer, ProCard, ProForm, ProFormDigit, ProFormSelect, ProFormTe
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/modules';
 import type { AppConfig, WorkflowInfo } from '../types';
+import { runSafely } from '../utils/async';
 
 const SystemConfig = () => {
   const [form] = Form.useForm<AppConfig>();
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
 
   useEffect(() => {
-    void api.getConfig().then((config) => form.setFieldsValue(config));
-    void api.listWorkflows().then(setWorkflows);
+    runSafely(api.getConfig().then((config) => form.setFieldsValue(config)));
+    runSafely(api.listWorkflows().then(setWorkflows));
   }, []);
 
   const workflowOptions = useMemo(
@@ -55,13 +56,13 @@ const SystemConfig = () => {
     <PageContainer
       title="系统配置"
       extra={[
-        <Button key="save" type="primary" icon={<SaveOutlined />} onClick={() => void save()}>
+        <Button key="save" type="primary" icon={<SaveOutlined />} onClick={() => runSafely(save())}>
           保存配置
         </Button>,
-        <Button key="sync" icon={<SyncOutlined />} onClick={() => void refresh()}>
+        <Button key="sync" icon={<SyncOutlined />} onClick={() => runSafely(refresh())}>
           同步行情
         </Button>,
-        <Button key="clear" icon={<ClearOutlined />} onClick={() => void recalc()}>
+        <Button key="clear" icon={<ClearOutlined />} onClick={() => runSafely(recalc())}>
           清理并重算缓存
         </Button>
       ]}
@@ -151,7 +152,7 @@ const SystemConfig = () => {
             title="火山搜索配置"
             bordered
             extra={
-              <Button icon={<SearchOutlined />} onClick={() => void testSearch()}>
+              <Button icon={<SearchOutlined />} onClick={() => runSafely(testSearch())}>
                 测试搜索
               </Button>
             }

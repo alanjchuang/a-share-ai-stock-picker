@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -61,6 +62,26 @@ app.include_router(watchlists.router)
 @app.exception_handler(ValueError)
 async def value_error_handler(_: Request, exc: ValueError) -> JSONResponse:
     return JSONResponse(status_code=400, content={"code": 400, "message": str(exc), "data": None})
+
+
+@app.exception_handler(RuntimeError)
+async def runtime_error_handler(_: Request, exc: RuntimeError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"code": 400, "message": str(exc), "data": None})
+
+
+@app.exception_handler(HTTPException)
+async def http_error_handler(_: Request, exc: HTTPException) -> JSONResponse:
+    message = exc.detail if isinstance(exc.detail, str) else "请求处理失败"
+    return JSONResponse(status_code=exc.status_code, content={"code": exc.status_code, "message": message, "data": None})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+    first_error = exc.errors()[0] if exc.errors() else {}
+    loc = ".".join(str(item) for item in first_error.get("loc", []) if item != "body")
+    detail = str(first_error.get("msg") or "请求参数校验失败")
+    message = f"{loc}: {detail}" if loc else detail
+    return JSONResponse(status_code=422, content={"code": 422, "message": message, "data": None})
 
 
 @app.exception_handler(Exception)

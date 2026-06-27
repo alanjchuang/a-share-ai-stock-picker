@@ -27,11 +27,12 @@ import { ProCard, ProForm, ProFormDigit, ProFormSelect, ProFormTextArea, ProTabl
 import type { ProColumns } from '@ant-design/pro-components';
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import * as XLSX from 'xlsx';
+import * as XLSX from '@e965/xlsx';
 import FactorCharts from '../components/FactorCharts';
 import { api, defaultScreeningRequest } from '../api/modules';
 import { useAppStore } from '../store/useAppStore';
 import type { IndexMeta, OneClickRecommendResponse, ScreeningRequest, ScreeningResult, StockDetail, StockScore, WorkflowInfo, WorkbenchMode } from '../types';
+import { runSafely } from '../utils/async';
 
 const ratingColor: Record<string, string> = {
   A: 'green',
@@ -91,17 +92,17 @@ const Workbench = () => {
 
   useEffect(() => {
     form.setFieldsValue(defaultScreeningRequest);
-    void api.listIndices().then(setIndices);
-    void api.listWorkflows().then((items) => {
+    runSafely(api.listIndices().then(setIndices));
+    runSafely(api.listWorkflows().then((items) => {
       setWorkflows(items);
       const defaultWorkflow = items.find((item) => item.is_default) ?? items[0];
       setSelectedWorkflowPath(defaultWorkflow?.path);
-    });
+    }));
   }, []);
 
   useEffect(() => {
     if (!selected) return;
-    void api.getStockDetail(selected.ts_code).then(setStockDetail);
+    runSafely(api.getStockDetail(selected.ts_code).then(setStockDetail));
   }, [selected]);
 
   const indexOptions = useMemo(
@@ -201,7 +202,7 @@ const Workbench = () => {
       width: 96,
       fixed: 'right',
       render: (_, record) => (
-        <Button type="link" size="small" icon={<StarOutlined />} onClick={(event) => void addToWatchlist(record, event)}>
+        <Button type="link" size="small" icon={<StarOutlined />} onClick={(event) => runSafely(addToWatchlist(record, event))}>
           自选
         </Button>
       )
@@ -236,7 +237,7 @@ const Workbench = () => {
 
   function reset(): void {
     form.setFieldsValue(defaultScreeningRequest);
-    void run(defaultScreeningRequest);
+    runSafely(run(defaultScreeningRequest));
   }
 
   function exportExcel(): void {
@@ -391,7 +392,7 @@ const Workbench = () => {
                 { label: '舆情', value: 'sentiment' }
               ]}
             />
-            <Button type="primary" block icon={<PlayCircleOutlined />} onClick={() => void run(beginnerRequest(beginnerPreset))}>
+            <Button type="primary" block icon={<PlayCircleOutlined />} onClick={() => runSafely(run(beginnerRequest(beginnerPreset)))}>
               执行新手筛选
             </Button>
             <Button block onClick={() => setWorkbenchMode('professional')}>
@@ -446,16 +447,16 @@ const Workbench = () => {
             <div className="toolbar-row">
               <Space wrap>
                 <Tooltip title="解析自然语言并执行选股">
-                  <Button type="primary" icon={<RobotOutlined />} onClick={() => void parseAiText()}>
+                  <Button type="primary" icon={<RobotOutlined />} onClick={() => runSafely(parseAiText())}>
                     AI解析选股
                   </Button>
                 </Tooltip>
                 <Tooltip title="根据近期行情、新闻舆情和多因子评分生成研究候选">
-                  <Button icon={<ThunderboltOutlined />} onClick={() => void oneClickRecommend()}>
+                  <Button icon={<ThunderboltOutlined />} onClick={() => runSafely(oneClickRecommend())}>
                     一键荐股
                   </Button>
                 </Tooltip>
-                <Button icon={<PlayCircleOutlined />} onClick={() => void run()}>
+                <Button icon={<PlayCircleOutlined />} onClick={() => runSafely(run())}>
                   执行选股
                 </Button>
                 <Button icon={<ReloadOutlined />} onClick={reset}>
@@ -467,7 +468,7 @@ const Workbench = () => {
                 <Button icon={<DownloadOutlined />} onClick={exportExcel}>
                   导出Excel
                 </Button>
-                <Button icon={<SyncOutlined />} onClick={() => void api.syncData().then(() => run())}>
+                <Button icon={<SyncOutlined />} onClick={() => runSafely(api.syncData().then(() => run()))}>
                   刷新数据
                 </Button>
               </Space>
@@ -528,7 +529,7 @@ const Workbench = () => {
           <FactorCharts result={result} stockDetail={stockDetail} />
         </ProCard>
       </Space>
-      <Modal title="保存当前策略" open={saveOpen} onCancel={() => setSaveOpen(false)} onOk={() => void saveStrategy()} destroyOnClose>
+      <Modal title="保存当前策略" open={saveOpen} onCancel={() => setSaveOpen(false)} onOk={() => runSafely(saveStrategy())} destroyOnClose>
         <ProForm form={saveForm} submitter={false} layout="vertical" initialValues={{ schedule_enabled: false, schedule_cron: '30 18 * * 1-5' }}>
           <ProFormTextArea name="name" label="策略名称" rules={[{ required: true, message: '请输入策略名称' }]} fieldProps={{ autoSize: { minRows: 1, maxRows: 1 } }} />
           <ProFormTextArea name="remark" label="备注" fieldProps={{ autoSize: { minRows: 2, maxRows: 3 } }} />

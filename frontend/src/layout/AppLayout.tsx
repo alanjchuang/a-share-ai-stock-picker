@@ -14,6 +14,7 @@ import DisclaimerBar from '../components/DisclaimerBar';
 import { useAppStore } from '../store/useAppStore';
 
 const { Header, Sider, Content } = Layout;
+const stockDetailMenuKey = '/stock/000001.SZ';
 
 const AppLayout = () => {
   const navigate = useNavigate();
@@ -41,14 +42,14 @@ const AppLayout = () => {
         <Sider width={214} breakpoint="lg" collapsedWidth={64} className="app-sider">
           <Menu
             mode="inline"
-            selectedKeys={[location.pathname.startsWith('/stock') ? '/stock' : location.pathname]}
+            selectedKeys={[location.pathname.startsWith('/stock') ? stockDetailMenuKey : location.pathname]}
             onClick={(item) => navigate(item.key)}
             items={[
               { key: '/', icon: <AreaChartOutlined />, label: '选股工作台' },
               { key: '/watchlist', icon: <StarOutlined />, label: '自选股复盘' },
               { key: '/strategies', icon: <BarChartOutlined />, label: '策略管理' },
               { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
-              { key: '/stock', icon: <DatabaseOutlined />, label: '个股详情' }
+              { key: stockDetailMenuKey, icon: <DatabaseOutlined />, label: '个股详情' }
             ]}
           />
         </Sider>
