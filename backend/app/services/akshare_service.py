@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import sqlite3
 import time
 from datetime import datetime, timedelta
@@ -85,10 +86,14 @@ class AkshareService:
     def _sync_spot_stocks(self, df: pd.DataFrame) -> int:
         count = 0
         metadata = self._metadata_for_symbols(df["代码"].head(max(0, self.settings.akshare.max_metadata_symbols)).tolist())
+        official_names = self._official_names()
         for item in df.to_dict(orient="records"):
             symbol = self._symbol(item["代码"])
             ts_code = self._ts_code(symbol)
-            name = str(item.get("名称") or "")
+            realtime_name = str(item.get("名称") or "")
+            existing = self.conn.execute("SELECT name FROM stocks WHERE ts_code = ?", (ts_code,)).fetchone()
+            existing_name = str(existing["name"] or "") if existing else ""
+            name = official_names.get(symbol) or self._stable_stock_name(realtime_name, existing_name)
             meta = metadata.get(symbol, {})
             self.conn.execute(
                 """
@@ -124,6 +129,36 @@ class AkshareService:
             )
             count += 1
         return count
+
+    def _official_names(self) -> dict[str, str]:
+        df = self._safe_call("A股官方简称", self.ak.stock_info_a_code_name)
+        if df is None or df.empty:
+            return {}
+        result: dict[str, str] = {}
+        for item in df.to_dict(orient="records"):
+            code = self._pick(item, ["code", "代码"], "")
+            name = str(self._pick(item, ["name", "名称"], "") or "").strip()
+            symbol = self._symbol(code)
+            if symbol and name:
+                result[symbol] = name
+        return result
+
+    @classmethod
+    def _stable_stock_name(cls, realtime_name: str, existing_name: str) -> str:
+        realtime = str(realtime_name or "").strip()
+        existing = str(existing_name or "").strip()
+        if cls._is_status_prefixed_name(realtime) and existing and not cls._is_status_prefixed_name(existing):
+            return existing
+        return cls._strip_realtime_prefix(realtime) or existing
+
+    @staticmethod
+    def _is_status_prefixed_name(value: str) -> bool:
+        return bool(re.match(r"^(\*?ST|XD|XR|DR)", str(value or "").strip(), flags=re.I))
+
+    @staticmethod
+    def _strip_realtime_prefix(value: str) -> str:
+        text = str(value or "").strip()
+        return re.sub(r"^(\*?ST|XD|XR|DR)", "", text, flags=re.I).strip()
 
     def _sync_spot_daily_and_basic(self, df: pd.DataFrame, trade_date: str) -> int:
         count = 0

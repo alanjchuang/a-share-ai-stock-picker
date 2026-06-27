@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any
 
@@ -130,15 +131,7 @@ class StockService:
         include_paused: bool,
     ) -> bool:
         if keyword:
-            haystack = " ".join(
-                [
-                    str(row.get("ts_code") or ""),
-                    str(row.get("symbol") or ""),
-                    str(row.get("name") or ""),
-                    str(row.get("industry") or ""),
-                ]
-            ).lower()
-            if keyword not in haystack:
+            if not StockService._keyword_matches(row, keyword):
                 return False
         if industry and industry != "全部" and str(row.get("industry") or "未分类") != industry:
             return False
@@ -149,6 +142,45 @@ class StockService:
         if not include_paused and int(row.get("is_paused") or 0):
             return False
         return True
+
+    @classmethod
+    def _keyword_matches(cls, row: dict[str, Any], keyword: str) -> bool:
+        normalized_keyword = cls._normalize_keyword(keyword)
+        if not normalized_keyword:
+            return True
+        fields = [
+            str(row.get("ts_code") or ""),
+            str(row.get("symbol") or ""),
+            str(row.get("name") or ""),
+            str(row.get("industry") or ""),
+            str(row.get("market") or ""),
+        ]
+        candidates = {cls._normalize_keyword(value) for value in fields if value}
+        raw_name = str(row.get("name") or "")
+        normalized_name = cls._normalize_stock_name(raw_name)
+        if normalized_name:
+            candidates.add(normalized_name)
+
+        for candidate in candidates:
+            if not candidate:
+                continue
+            if normalized_keyword in candidate:
+                return True
+            # 兼容 XD/DR 前缀和行情源短名称，例如“中国联通” vs “XD中国联”。
+            if len(candidate) >= 3 and candidate in normalized_keyword:
+                return True
+        return False
+
+    @classmethod
+    def _normalize_keyword(cls, value: str) -> str:
+        return cls._normalize_stock_name(value).lower().replace(" ", "").replace("-", "").replace("_", "")
+
+    @staticmethod
+    def _normalize_stock_name(value: str) -> str:
+        text = str(value or "").strip().lower()
+        text = re.sub(r"^\*?st", "", text)
+        text = re.sub(r"^(xd|xr|dr|n|c)", "", text)
+        return text.replace(" ", "")
 
     @staticmethod
     def _sortable_fields() -> set[str]:

@@ -92,6 +92,14 @@ const StockMarket = () => {
     runSafely(loadMarket());
   }, [query, industry, rating, includeSt, includePaused, page, pageSize, sortBy, sortOrder]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(1);
+      setQuery(keywordInput.trim());
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [keywordInput]);
+
   function handleSearch(value: string): void {
     setPage(1);
     setQuery(value.trim());
@@ -215,7 +223,7 @@ const StockMarket = () => {
             value={keywordInput}
             onChange={(event) => setKeywordInput(event.target.value)}
             onSearch={handleSearch}
-            placeholder="搜索股票代码、名称、拼音代码或行业"
+            placeholder="搜索股票代码、名称或行业，例如 中国联通 / 600050"
             style={{ width: 360, maxWidth: '100%' }}
           />
           <Select
