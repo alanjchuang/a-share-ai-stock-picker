@@ -10,6 +10,37 @@ from app.services.background_jobs import get_active_job, request_cancel_job, sub
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
 
+def _reconcile_orphaned_jobs(conn) -> dict[str, Any] | None:
+    active = get_active_job()
+    active_job_id = int(active.get("job_id") or 0) if active else 0
+    if active_job_id:
+        conn.execute(
+            """
+            UPDATE sync_jobs
+            SET status='failed',
+                message=message || '（任务不在当前进程运行，已自动标记为中断。）',
+                finished_at=CURRENT_TIMESTAMP
+            WHERE status IN ('queued', 'running', 'cancel_requested')
+              AND finished_at IS NULL
+              AND id != ?
+            """,
+            (active_job_id,),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE sync_jobs
+            SET status='failed',
+                message=message || '（任务不在当前进程运行，已自动标记为中断。）',
+                finished_at=CURRENT_TIMESTAMP
+            WHERE status IN ('queued', 'running', 'cancel_requested')
+              AND finished_at IS NULL
+            """
+        )
+    conn.commit()
+    return active
+
+
 @router.post("/run", response_model=ApiResponse[dict[str, Any]])
 def run_sync(payload: SyncRequest) -> ApiResponse[dict[str, Any]]:
     job = submit_sync_refresh_job(payload)
@@ -26,13 +57,14 @@ def run_all_history_sync() -> ApiResponse[dict[str, Any]]:
 
 @router.get("/jobs", response_model=ApiResponse[list[dict[str, Any]]])
 def jobs(conn=Depends(get_db)) -> ApiResponse[list[dict[str, Any]]]:
+    _reconcile_orphaned_jobs(conn)
     rows = conn.execute("SELECT * FROM sync_jobs ORDER BY started_at DESC LIMIT 50").fetchall()
     return ok([dict(row) for row in rows])
 
 
 @router.get("/jobs/active", response_model=ApiResponse[dict[str, Any] | None])
 def active_job(conn=Depends(get_db)) -> ApiResponse[dict[str, Any] | None]:
-    active = get_active_job()
+    active = _reconcile_orphaned_jobs(conn)
     if not active:
         return ok(None)
     row = conn.execute("SELECT * FROM sync_jobs WHERE id = ?", (active.get("job_id"),)).fetchone()
