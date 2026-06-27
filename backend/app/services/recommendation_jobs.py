@@ -17,6 +17,7 @@ _active_future: Future[None] | None = None
 _active_job_id: int | None = None
 _STALE_JOB_MINUTES = 30
 _STALE_JOB_MESSAGE = "一键荐股任务已中断或服务重启，请重新发起。"
+_READINESS_BLOCKED_PREFIX = "一键荐股需要先完成配置："
 
 
 def submit_one_click_recommendation_job(payload: OneClickRecommendRequest) -> dict[str, Any]:
@@ -242,11 +243,17 @@ def _job_out(row: dict[str, Any]) -> dict[str, Any]:
                 result = parsed
         except json.JSONDecodeError:
             result = None
+    status = str(row["status"])
+    message = str(row.get("message") or "")
+    # 兼容旧版本：以前会把“数据/配置未就绪”的预检阻断写成 failed 历史，
+    # 这里输出时归类为 blocked，避免前端误判为真实执行失败。
+    if status == "failed" and message.startswith(_READINESS_BLOCKED_PREFIX):
+        status = "blocked"
     return {
         "id": int(row["id"]),
         "job_type": str(row.get("job_type") or "one_click_recommendation"),
-        "status": str(row["status"]),
-        "message": str(row.get("message") or ""),
+        "status": status,
+        "message": message,
         "started_at": str(row.get("started_at") or ""),
         "finished_at": row.get("finished_at"),
         "result": result,

@@ -99,6 +99,8 @@ function recommendationJobLabel(job: OneClickRecommendJob): string {
   const statusText =
     job.status === 'success'
       ? `${resultCount ?? 0}只`
+      : job.status === 'blocked'
+        ? '配置未完成'
       : job.status === 'failed' && job.message.includes('需要先完成配置')
         ? '配置未完成'
         : job.status === 'failed'
@@ -106,7 +108,7 @@ function recommendationJobLabel(job: OneClickRecommendJob): string {
           : job.status === 'running'
             ? '运行中'
             : job.status;
-  const message = job.status === 'failed' && job.message ? ` · ${job.message.slice(0, 34)}${job.message.length > 34 ? '...' : ''}` : '';
+  const message = ['failed', 'blocked'].includes(job.status) && job.message ? ` · ${job.message.slice(0, 34)}${job.message.length > 34 ? '...' : ''}` : '';
   return [time, statusText].filter(Boolean).join(' · ') + message;
 }
 
@@ -114,7 +116,7 @@ function workflowJobLabel(job: StockSelectionWorkflowJob): string {
   const time = formatLocalDateTime(job.finished_at || job.started_at);
   const resultCount = job.result?.screening_result?.total;
   const statusText = job.status === 'success' ? `${resultCount ?? 0}只` : job.status;
-  const message = job.status === 'failed' && job.message ? ` · ${job.message.slice(0, 34)}${job.message.length > 34 ? '...' : ''}` : '';
+  const message = ['failed', 'blocked'].includes(job.status) && job.message ? ` · ${job.message.slice(0, 34)}${job.message.length > 34 ? '...' : ''}` : '';
   return [time, statusText].filter(Boolean).join(' · ') + message;
 }
 
@@ -567,7 +569,7 @@ const Workbench = () => {
       setRecommendation(job.result);
       setRecommendationError(null);
       if (showSuccess) notifySuccess('一键研究推荐完成');
-    } else if (job.status === 'failed') {
+    } else if (job.status === 'failed' || job.status === 'blocked') {
       setRecommendationError(job.message || '一键荐股后台任务失败。');
     }
   }

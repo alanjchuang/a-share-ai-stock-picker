@@ -587,7 +587,7 @@ export interface OneClickRecommendResponse {
 export interface OneClickRecommendJob {
   id: number;
   job_type: string;
-  status: 'queued' | 'running' | 'success' | 'failed' | string;
+  status: 'queued' | 'running' | 'success' | 'failed' | 'blocked' | string;
   message: string;
   started_at: string;
   finished_at?: string | null;

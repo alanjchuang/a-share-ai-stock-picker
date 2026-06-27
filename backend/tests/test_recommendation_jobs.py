@@ -123,6 +123,46 @@ class RecommendationJobsTest(unittest.TestCase):
             self.assertIn("LLM 未配置", submit_result["message"])
             self.assertEqual(jobs, [])
 
+    def test_legacy_readiness_failure_is_reported_as_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, "config.toml")
+            db_path = os.path.join(tmpdir, "jobs.sqlite3")
+            with open(config_path, "w", encoding="utf-8") as file:
+                file.write(f'[database]\npath = "{db_path}"\n')
+
+            with patch.dict(os.environ, {"A_STOCK_CONFIG": config_path}):
+                conn = get_connection()
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS recommendation_jobs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        job_type TEXT NOT NULL DEFAULT 'one_click_recommendation',
+                        status TEXT NOT NULL,
+                        message TEXT DEFAULT '',
+                        request_json TEXT DEFAULT '',
+                        result_json TEXT DEFAULT '',
+                        started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        finished_at TEXT
+                    )
+                    """
+                )
+                cursor = conn.execute(
+                    """
+                    INSERT INTO recommendation_jobs(job_type, status, message)
+                    VALUES ('one_click_recommendation', 'failed', '一键荐股需要先完成配置：LLM 未配置')
+                    """
+                )
+                conn.commit()
+                job_id = int(cursor.lastrowid)
+                conn.close()
+
+                job = get_one_click_recommendation_job(job_id)
+                jobs = list_one_click_recommendation_jobs(limit=5)
+
+            self.assertEqual(job["status"], "blocked")
+            self.assertEqual(jobs[0]["status"], "blocked")
+            self.assertIn("LLM 未配置", jobs[0]["message"])
+
 
 if __name__ == "__main__":
     unittest.main()
