@@ -481,6 +481,8 @@ class StockSelectionWorkflowResult(BaseModel):
     screening_result: ScreeningResult | None = None
     llm_analysis: dict[str, object] = Field(default_factory=dict)
     raw_conditions: dict[str, object] = Field(default_factory=dict)
+    tool_calls: list[dict[str, object]] = Field(default_factory=list)
+    parse_warnings: list[str] = Field(default_factory=list)
     steps: list[WorkflowStepTrace] = Field(default_factory=list)
 
 

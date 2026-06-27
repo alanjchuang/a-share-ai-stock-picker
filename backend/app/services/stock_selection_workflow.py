@@ -20,8 +20,9 @@ from app.models.schemas import (
     WorkflowStepTrace,
 )
 from app.services.llm_client import LlmClient
-from app.services.nl_parser import INDEX_ALIASES, NaturalLanguageParser
+from app.services.nl_parser import NaturalLanguageParser
 from app.services.screener_service import ScreenerService
+from app.services.stock_selection_builtin_tools import INDEX_ALIASES, StockSelectionBuiltinTools
 from app.services.web_search_service import WebSearchService
 
 
@@ -116,6 +117,11 @@ class StockSelectionWorkflow:
         llm_analysis = context.get("llm_analysis")
         if not isinstance(llm_analysis, dict):
             llm_analysis = self._deterministic_summary(request.text, parsed_request, screening_result)
+        parse_warnings = context.get("parse_warnings")
+        if not isinstance(parse_warnings, list):
+            parse_warnings = []
+        if parse_warnings:
+            llm_analysis.setdefault("parse_warnings", parse_warnings)
 
         return StockSelectionWorkflowResult(
             workflow_name=str(config.get("name") or "stock_selection_workflow"),
@@ -124,14 +130,18 @@ class StockSelectionWorkflow:
             screening_result=screening_result,
             llm_analysis=llm_analysis,
             raw_conditions=self._as_dict(context.get("raw_conditions") or parsed_request.model_dump(mode="json")),
+            tool_calls=self._as_list_of_dicts(context.get("applied_tool_calls")),
+            parse_warnings=[str(item) for item in parse_warnings],
             steps=traces,
         )
 
     def _validate_ready(self, config: dict[str, Any]) -> None:
         enabled_step_types = {str(step.get("type") or "") for step in config.get("steps", []) if step.get("enabled", True)}
         missing: list[str] = []
-        if "llm_intent_parse" not in enabled_step_types:
-            missing.append("Workflow 缺少启用的 LLM 自然语言解析步骤")
+        if "llm_intent_parse" not in enabled_step_types and "llm_tool_plan" not in enabled_step_types:
+            missing.append("Workflow 缺少启用的 LLM 工具规划步骤")
+        if "llm_tool_plan" in enabled_step_types and "builtin_tool_guard" not in enabled_step_types:
+            missing.append("Workflow 使用工具规划时必须启用 builtin_tool_guard 条件构造步骤")
         if any(step_type.startswith("llm_") for step_type in enabled_step_types) and not self.llm.available:
             missing.append("LLM 未配置，请在系统配置填写 Provider、API 地址、API Key 和模型名")
         if missing:
@@ -143,10 +153,36 @@ class StockSelectionWorkflow:
             prompt = self._render_prompt(str(step.get("prompt") or ""), context)
             raw = self.llm.chat_json("你是A股选股 workflow 的条件解析 Agent。", prompt)
             return raw, "LLM已输出结构化选股条件", "success"
+        if step_type == "llm_tool_plan":
+            default_prompt = StockSelectionBuiltinTools.planning_prompt(str(context.get("user_text") or ""))
+            prompt = self._render_prompt(str(step.get("prompt") or default_prompt), context)
+            tool_calls = self.llm.chat_tool_calls(
+                "你是A股选股Workflow的工具规划Agent。只能通过已注册函数工具表达筛选意图。",
+                prompt,
+                StockSelectionBuiltinTools.tool_definitions(),
+            )
+            if not tool_calls and bool(step.get("require_tool_calls", True)):
+                raise ValueError("LLM未返回任何builtin tool调用")
+            output = {"tool_calls": tool_calls, "tool_count": len(tool_calls)}
+            return output, f"LLM已规划 {len(tool_calls)} 个builtin工具调用", "success"
         if step_type == "condition_guard":
             raw = context.get("raw_conditions")
             parsed = self._build_request(raw, str(context.get("user_text") or ""))
             return parsed, "结构化条件已通过Pydantic校验并补齐默认值", "success"
+        if step_type == "builtin_tool_guard":
+            input_key = str(step.get("input_key") or "tool_plan")
+            plan = context.get(input_key) or context.get("raw_conditions") or {}
+            toolbox = StockSelectionBuiltinTools(self.settings)
+            execution = toolbox.execute(plan, user_text=str(context.get("user_text") or ""))
+            context["raw_conditions"] = {
+                "request": execution.raw_conditions,
+                "applied_tools": execution.applied_tools,
+                "warnings": execution.warnings,
+            }
+            context["applied_tool_calls"] = execution.applied_tools
+            context["parse_warnings"] = execution.warnings
+            warning_text = f"，告警 {len(execution.warnings)} 条" if execution.warnings else ""
+            return execution.request, f"builtin工具已生成可执行筛选条件，应用 {len(execution.applied_tools)} 个工具{warning_text}", "success"
         if step_type == "screen":
             parsed = context.get("screening_request")
             if not isinstance(parsed, ScreeningRequest):
@@ -278,6 +314,7 @@ class StockSelectionWorkflow:
             "user_text": str(context.get("user_text") or ""),
             "index_aliases_json": json.dumps(INDEX_ALIASES, ensure_ascii=False),
             "default_weights_json": json.dumps(self.settings.weights.__dict__, ensure_ascii=False),
+            "builtin_tools_json": json.dumps(StockSelectionBuiltinTools.tool_definitions(), ensure_ascii=False),
         }
         for key, value in context.items():
             if key not in values:
@@ -405,3 +442,9 @@ class StockSelectionWorkflow:
         if isinstance(value, dict):
             return value
         return {"value": str(value)}
+
+    @staticmethod
+    def _as_list_of_dicts(value: Any) -> list[dict[str, object]]:
+        if not isinstance(value, list):
+            return []
+        return [item for item in value if isinstance(item, dict)]

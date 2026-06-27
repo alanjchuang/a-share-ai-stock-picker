@@ -1,35 +1,12 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
-
-import httpx
 
 from app.core.config import load_settings
 from app.models.schemas import ScreeningRequest
 from app.services.llm_client import LlmClient
-from app.services.sentiment_service import SentimentService
-
-
-INDEX_ALIASES = {
-    "沪深300": "000300.SH",
-    "中证500": "000905.SH",
-    "中证1000": "000852.SH",
-    "上证50": "000016.SH",
-    "创业板": "399006.SZ",
-    "创业板指": "399006.SZ",
-    "科创50": "000688.SH",
-    "北证50": "899050.BJ",
-    "AI": "CONCEPT_AI",
-    "算力": "CONCEPT_AI",
-    "半导体": "CONCEPT_SEMI",
-    "国产替代": "CONCEPT_SEMI",
-    "储能": "CONCEPT_STORAGE",
-    "新能源": "CONCEPT_STORAGE",
-    "军工": "CONCEPT_DEFENSE",
-    "医药": "CONCEPT_MEDICAL",
-}
+from app.services.stock_selection_builtin_tools import INDEX_ALIASES, StockSelectionBuiltinTools
 
 
 class NaturalLanguageParser:
@@ -37,7 +14,7 @@ class NaturalLanguageParser:
         settings = load_settings()
         if LlmClient(settings.llm).available:
             try:
-                return self._llm_parse(text)
+                return self._llm_tool_parse(text)
             except Exception:
                 return self._heuristic_parse(text)
         return self._heuristic_parse(text)
@@ -47,9 +24,9 @@ class NaturalLanguageParser:
         if not LlmClient(settings.llm).available:
             raise RuntimeError("AI解析选股需要先完成配置：LLM 未配置，请在系统配置填写 Provider、API 地址、API Key 和模型名")
         try:
-            return self._llm_parse(text)
+            return self._llm_tool_parse(text, require_calls=True)
         except Exception as exc:
-            raise RuntimeError(f"AI解析选股失败：LLM调用或JSON解析失败，请检查API Key、模型名和接口地址后重试：{exc}") from exc
+            raise RuntimeError(f"AI解析选股失败：LLM工具调用规划或参数校验失败，请检查API Key、模型名、Workflow和输入条件后重试：{exc}") from exc
 
     def _heuristic_parse(self, text: str) -> ScreeningRequest:
         data: dict[str, Any] = {
@@ -114,22 +91,20 @@ class NaturalLanguageParser:
         return ScreeningRequest.model_validate(data)
 
     def _llm_parse(self, text: str) -> ScreeningRequest:
+        return self._llm_tool_parse(text, require_calls=True)
+
+    def _llm_tool_parse(self, text: str, require_calls: bool = False) -> ScreeningRequest:
         settings = load_settings()
-        prompt = f"""
-把A股自然语言选股需求转换为JSON，必须符合这些顶层字段：
-logic,index,fundamental,technical,capital,sentiment,filters,weights,limit。
-只输出JSON，不要解释。字段名使用英文，例如PE对应fundamental.pe_ttm.max，ROE下限对应fundamental.roe.min，舆情阈值对应sentiment.min_avg_score。
-指数代码映射：{json.dumps(INDEX_ALIASES, ensure_ascii=False)}
-用户需求：{text}
-"""
-        payload = {
-            "deprecated": True
-        }
-        _ = payload
-        raw = LlmClient(settings.llm).chat_json("你是A股自然语言选股条件解析器。", prompt)
-        raw.setdefault("weights", settings.weights.__dict__)
-        raw.setdefault("limit", 200)
-        return ScreeningRequest.model_validate(raw)
+        toolbox = StockSelectionBuiltinTools(settings)
+        calls = LlmClient(settings.llm).chat_tool_calls(
+            "你是A股自然语言选股Workflow的工具规划Agent。只通过函数工具表达筛选意图。",
+            StockSelectionBuiltinTools.planning_prompt(text),
+            StockSelectionBuiltinTools.tool_definitions(),
+        )
+        if require_calls and not calls:
+            raise ValueError("LLM未返回任何builtin tool调用")
+        result = toolbox.execute(calls, user_text=text)
+        return result.request
 
     @staticmethod
     def _parse_range(text: str, target: dict[str, Any], field: str, patterns: list[str], bound: str) -> None:

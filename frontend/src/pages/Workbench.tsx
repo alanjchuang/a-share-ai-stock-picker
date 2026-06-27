@@ -31,7 +31,17 @@ import * as XLSX from '@e965/xlsx';
 import FactorCharts from '../components/FactorCharts';
 import { api, defaultScreeningRequest } from '../api/modules';
 import { useAppStore } from '../store/useAppStore';
-import type { IndexMeta, OneClickRecommendResponse, ScreeningRequest, ScreeningResult, StockDetail, StockScore, WorkflowInfo, WorkbenchMode } from '../types';
+import type {
+  IndexMeta,
+  OneClickRecommendResponse,
+  ScreeningRequest,
+  ScreeningResult,
+  StockDetail,
+  StockScore,
+  StockSelectionWorkflowResult,
+  WorkflowInfo,
+  WorkbenchMode
+} from '../types';
 import { runSafely } from '../utils/async';
 import { notifySuccess } from '../utils/feedback';
 
@@ -66,6 +76,14 @@ function diagnosticsDescription(result: ScreeningResult): string {
 function getRequestErrorMessage(error: unknown, fallbackMessage: string): string {
   const maybeError = error as { response?: { data?: { message?: string } }; message?: string };
   return maybeError.response?.data?.message || maybeError.message || fallbackMessage;
+}
+
+function workflowDescription(workflow: StockSelectionWorkflowResult): string {
+  const stepText = workflow.steps.map((step) => `${step.name || step.id}:${step.status}`).join('；');
+  const warnings = workflow.parse_warnings.length ? `解析告警：${workflow.parse_warnings.join('；')}` : '';
+  return [`builtin工具调用${workflow.tool_calls.length}个。`, warnings, stepText ? `执行链路：${stepText}` : '']
+    .filter(Boolean)
+    .join(' ');
 }
 
 function normalizeRequest(values: Partial<ScreeningRequest>): ScreeningRequest {
@@ -112,6 +130,7 @@ const Workbench = () => {
   const [recommendation, setRecommendation] = useState<OneClickRecommendResponse | null>(null);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [aiParseError, setAiParseError] = useState<string | null>(null);
+  const [workflowResult, setWorkflowResult] = useState<StockSelectionWorkflowResult | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [selectedWorkflowPath, setSelectedWorkflowPath] = useState<string | undefined>();
   const [saveOpen, setSaveOpen] = useState(false);
@@ -238,6 +257,7 @@ const Workbench = () => {
   async function run(values?: Partial<ScreeningRequest>): Promise<void> {
     setAiParseError(null);
     setRecommendationError(null);
+    setWorkflowResult(null);
     const request = normalizeRequest(values ?? form.getFieldsValue(true));
     form.setFieldsValue(request);
     setCurrentRequest(request);
@@ -251,8 +271,10 @@ const Workbench = () => {
   async function parseAiText(): Promise<void> {
     setAiParseError(null);
     setRecommendationError(null);
+    setWorkflowResult(null);
     try {
       const workflow = await api.runSelectionWorkflow(aiText, selectedWorkflowPath);
+      setWorkflowResult(workflow);
       form.setFieldsValue(workflow.parsed_request);
       setCurrentRequest(workflow.parsed_request);
       if (workflow.screening_result) {
@@ -265,6 +287,7 @@ const Workbench = () => {
       const view = workflow.llm_analysis.market_view;
       notifySuccess(typeof view === 'string' ? view : `Workflow执行完成：${workflow.workflow_name}`);
     } catch (error) {
+      setWorkflowResult(null);
       setAiParseError(getRequestErrorMessage(error, 'AI解析选股失败，请先检查 LLM 与 Workflow 配置。'));
       throw error;
     }
@@ -328,6 +351,7 @@ const Workbench = () => {
   async function oneClickRecommend(): Promise<void> {
     setAiParseError(null);
     setRecommendationError(null);
+    setWorkflowResult(null);
     setRecommendation(null);
     try {
       const data = await api.oneClickRecommend({
@@ -543,6 +567,14 @@ const Workbench = () => {
                 去配置
               </Button>
             }
+          />
+        ) : null}
+        {workflowResult ? (
+          <Alert
+            showIcon
+            type={workflowResult.parse_warnings.length ? 'warning' : 'success'}
+            message={`AI解析Workflow完成：${workflowResult.workflow_name}`}
+            description={workflowDescription(workflowResult)}
           />
         ) : null}
         {recommendationError ? (

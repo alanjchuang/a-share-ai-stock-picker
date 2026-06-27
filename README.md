@@ -35,7 +35,7 @@ chmod +x start.sh stop.sh
 所有核心配置都在 `config.toml`：
 
 - `[market_data] provider`：默认 `auto`，可选 `akshare`、`tushare`、`demo`。`auto` 会按 AKShare -> Tushare -> 演示数据顺序尝试。
-- `[akshare]`：AKShare 数据源配置，包括复权方式、请求间隔、历史K线/财务/新闻/基础信息批量上限。批量全市场同步建议保留请求间隔，降低网页数据源临时限流风险。
+- `[akshare]`：AKShare 数据源配置，包括复权方式、请求间隔、历史K线/财务/新闻/基础信息批量上限。`max_history_symbols = 0` 表示常规同步也拉取全市场历史K线；数据中心另提供“全市场补齐K线”任务，会按 `history_min_rows` 检查全市场K线深度并在完成后自动重算因子。
 - `[tushare] token`：使用 Tushare 时填入 token；不填 token 时 Tushare 路径会跳过或回退。
 - `[llm] provider`：默认 `heuristic`，不内置任何大模型密钥。进入“系统配置”页后可切到 OpenAI 兼容、通义千问兼容或本地模型，并填写 API 地址、Key、模型和超时重试参数。
 - `[llm] max_tokens`、`timeout_seconds`、`num_retries`：大模型调用的输出长度、超时和重试控制。
@@ -85,28 +85,29 @@ pip install -r requirements-llm.txt
 
 后端 `app/services/stock_selection_workflow.py` 提供可配置大模型选股 workflow。Workflow 文件放在 `workflows/` 目录，前端工作台会读取列表让用户选择；系统配置页也可设置默认 workflow。它参考 AgentLoom 的分阶段编排思路，把一次“大模型选股”拆成：
 
-1. 自然语言条件解析
-2. 条件校验与规则补强
+1. 自然语言工具规划：LLM 只返回 builtin tool calls，不再直接产出最终筛选 JSON
+2. Builtin 工具执行与风控补全：后端白名单工具负责字段映射、类型转换、空值丢弃和 Pydantic 校验
 3. 多因子确定性筛选
 4. 火山搜索实时资料检索
 5. 候选股大模型复核
 
-旧的 `app/services/nl_parser.py` 仍作为规则兜底使用。用户在前端工作台输入自然语言条件后，系统会自动转换为指数、基本面、资金、舆情和市值过滤条件，并一键执行。
+`app/services/stock_selection_builtin_tools.py` 内置 `select_index_pool`、`set_fundamental_ranges`、`set_technical_conditions`、`set_capital_conditions`、`set_sentiment_conditions`、`set_risk_filters`、`set_score_weights`、`set_result_limit` 等受控工具。模型传入 `null`、未知字段或非法枚举时会被后端丢弃并返回解析告警，避免把不可靠 JSON 直接塞进筛选接口。旧的 `app/services/nl_parser.py` 仍作为非 AI 规则兜底使用。
 
 Workflow 步骤可在 TOML 中开关、改提示词、调整候选数量。例如：
 
 ```toml
 [[steps]]
-id = "web_research"
-type = "web_search"
+id = "tool_planner"
+type = "llm_tool_plan"
 enabled = true
-query_template = "{{user_text}} A股 最新 政策 财报 舆情 新闻 候选股：{{candidate_names}}"
+output_key = "tool_plan"
 
 [[steps]]
-id = "candidate_reviewer"
-type = "llm_candidate_review"
+id = "condition_guard"
+type = "builtin_tool_guard"
 enabled = true
-candidate_limit = 20
+input_key = "tool_plan"
+output_key = "screening_request"
 ```
 
 ## 页面说明
