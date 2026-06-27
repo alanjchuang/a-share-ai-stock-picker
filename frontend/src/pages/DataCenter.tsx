@@ -1,5 +1,5 @@
-import { ClearOutlined, DatabaseOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
-import { Alert, Button, Progress, Space, Tag, Typography } from 'antd';
+import { ClearOutlined, CloudDownloadOutlined, DatabaseOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
+import { Alert, Button, Popconfirm, Progress, Space, Tag, Typography } from 'antd';
 import { PageContainer, ProCard, ProTable, StatisticCard } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
 import { useEffect, useMemo, useState } from 'react';
@@ -24,6 +24,7 @@ const DataCenter = () => {
   const [health, setHealth] = useState<DataHealthResponse | null>(null);
   const [jobs, setJobs] = useState<SyncJobOut[]>([]);
   const stockCount = useMemo(() => health?.tables.find((item) => item.key === 'stocks')?.row_count ?? 0, [health?.tables]);
+  const hasRunningJob = useMemo(() => jobs.some((item) => ['queued', 'running'].includes(item.status)), [jobs]);
 
   async function load(): Promise<void> {
     const [nextHealth, nextJobs] = await Promise.all([api.getDataHealth(), api.listSyncJobs()]);
@@ -37,6 +38,12 @@ const DataCenter = () => {
     await load();
   }
 
+  async function syncAllHistory(): Promise<void> {
+    const job = await api.syncAllStockHistory();
+    notifySuccess(job.message);
+    await load();
+  }
+
   async function recalc(): Promise<void> {
     const job = await api.calculateFactors();
     notifySuccess(job.message);
@@ -46,6 +53,14 @@ const DataCenter = () => {
   useEffect(() => {
     runSafely(load());
   }, []);
+
+  useEffect(() => {
+    if (!hasRunningJob) return undefined;
+    const timer = window.setInterval(() => {
+      runSafely(load());
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [hasRunningJob]);
 
   const tableColumns: ProColumns<DataTableStatus>[] = [
     { title: '数据集', dataIndex: 'name', width: 140, fixed: 'left' },
@@ -84,6 +99,16 @@ const DataCenter = () => {
         <Button key="sync" type="primary" icon={<SyncOutlined />} onClick={() => runSafely(sync())}>
           后台同步
         </Button>,
+        <Popconfirm
+          key="history"
+          title="全市场历史K线补齐"
+          description="会遍历全部股票拉取历史K线，耗时较长；任务会在后台串行执行。"
+          okText="开始补齐"
+          cancelText="取消"
+          onConfirm={() => runSafely(syncAllHistory())}
+        >
+          <Button icon={<CloudDownloadOutlined />}>全市场补齐K线</Button>
+        </Popconfirm>,
         <Button key="factor" icon={<ClearOutlined />} onClick={() => runSafely(recalc())}>
           重算因子
         </Button>,

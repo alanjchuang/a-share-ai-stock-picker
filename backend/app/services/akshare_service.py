@@ -4,6 +4,7 @@ import math
 import re
 import sqlite3
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -120,6 +121,105 @@ class AkshareService:
         self.conn.commit()
         summary["rows"] = rows
         return summary
+
+    def sync_all_stock_history(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        min_rows: int | None = None,
+        progress: Callable[[int, int, str, int, int], None] | None = None,
+    ) -> dict[str, Any]:
+        """补齐全市场历史K线。
+
+        选股技术因子依赖足够长的历史序列。这个任务直接遍历本地股票池，
+        对K线深度不足的股票从AKShare拉取默认历史区间，已达标的股票跳过。
+        """
+        if not self.settings.akshare.enabled:
+            raise RuntimeError("AKShare数据源已在配置中禁用")
+
+        safe_start_date = start_date or self.settings.akshare.default_start_date
+        safe_end_date = end_date or self.settings.akshare.default_end_date or self._last_workday()
+        safe_min_rows = max(int(min_rows or self.settings.akshare.history_min_rows or 120), 1)
+        symbols = [
+            str(row["symbol"])
+            for row in self.conn.execute(
+                """
+                SELECT symbol
+                FROM stocks
+                WHERE COALESCE(symbol, '') != ''
+                ORDER BY ts_code
+                """
+            ).fetchall()
+        ]
+        if not symbols:
+            spot_df = self._safe_call("A股实时行情", self.ak.stock_zh_a_spot_em)
+            if spot_df is None or spot_df.empty:
+                raise RuntimeError("股票池为空，且AKShare未返回A股实时行情")
+            spot_df = self._normalize_spot(spot_df)
+            self._sync_spot_stocks(spot_df)
+            self.conn.commit()
+            symbols = spot_df["代码"].astype(str).tolist()
+
+        total = len(symbols)
+        fetched_symbols = 0
+        skipped_symbols = 0
+        failed_symbols = 0
+        inserted_rows = 0
+        warnings: list[str] = []
+
+        for index, symbol in enumerate(symbols, start=1):
+            normalized = self._symbol(symbol)
+            ts_code = self._ts_code(normalized)
+            existing = self.conn.execute(
+                "SELECT COUNT(*) AS rows_count, MAX(trade_date) AS latest_date FROM stock_daily WHERE ts_code = ?",
+                (ts_code,),
+            ).fetchone()
+            existing_rows = int(existing["rows_count"] or 0) if existing else 0
+            latest_date = str(existing["latest_date"] or "") if existing else ""
+            if existing_rows >= safe_min_rows and latest_date >= safe_end_date:
+                skipped_symbols += 1
+                if progress and (index == total or index % 25 == 0):
+                    progress(index, total, ts_code, inserted_rows, skipped_symbols)
+                continue
+
+            hist = self._safe_call(
+                f"{normalized}历史行情",
+                self.ak.stock_zh_a_hist,
+                symbol=normalized,
+                period="daily",
+                start_date=safe_start_date,
+                end_date=safe_end_date,
+                adjust=self.settings.akshare.adjust,
+            )
+            if hist is None or hist.empty:
+                failed_symbols += 1
+                if len(warnings) < 50:
+                    warnings.append(f"{ts_code} 历史K线为空")
+                if progress and (index == total or index % 10 == 0):
+                    progress(index, total, ts_code, inserted_rows, skipped_symbols)
+                self._sleep()
+                continue
+
+            inserted_rows += self._insert_history(normalized, hist)
+            fetched_symbols += 1
+            self.conn.commit()
+            if progress and (index == total or index % 10 == 0):
+                progress(index, total, ts_code, inserted_rows, skipped_symbols)
+            self._sleep()
+
+        return {
+            "mode": "akshare",
+            "task": "all_stock_history",
+            "start_date": safe_start_date,
+            "end_date": safe_end_date,
+            "min_rows": safe_min_rows,
+            "total_symbols": total,
+            "fetched_symbols": fetched_symbols,
+            "skipped_symbols": skipped_symbols,
+            "failed_symbols": failed_symbols,
+            "rows": inserted_rows,
+            "warnings": warnings,
+        }
 
     def _sync_spot_stocks(self, df: pd.DataFrame) -> int:
         count = 0

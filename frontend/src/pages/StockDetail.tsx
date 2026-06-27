@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, ReloadOutlined, StarOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, DatabaseOutlined, ReloadOutlined, StarOutlined } from '@ant-design/icons';
 import { Alert, Button, Descriptions, Empty, List, Space, Tag, Typography } from 'antd';
 import { PageContainer, ProCard, StatisticCard } from '@ant-design/pro-components';
 import ReactECharts from 'echarts-for-react';
@@ -57,7 +57,6 @@ const StockDetail = () => {
   const { tsCode } = useParams<{ tsCode: string }>();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<StockDetailType | null>(null);
-  const [historySyncing, setHistorySyncing] = useState(false);
 
   const load = () => {
     if (tsCode) runSafely(api.getStockDetail(tsCode).then(setDetail));
@@ -80,17 +79,6 @@ const StockDetail = () => {
     if (!detail) return false;
     return detail.kline.length < 30 || detail.data_warnings.some((warning) => warning.includes('K线'));
   }, [detail]);
-
-  async function syncHistory(): Promise<void> {
-    if (!detail) return;
-    setHistorySyncing(true);
-    try {
-      const job = await api.syncStockHistory(detail.base.ts_code);
-      notifySuccess(job.message || '历史K线补齐已在后台启动');
-    } finally {
-      setHistorySyncing(false);
-    }
-  }
 
   async function addToWatchlist(): Promise<void> {
     if (!detail) return;
@@ -131,8 +119,8 @@ const StockDetail = () => {
             description={detail.data_warnings.length ? detail.data_warnings.join('；') : '行情、财务和因子均来自本地SQLite缓存；可在数据中心查看同步状态和缓存覆盖。'}
             action={
               needsHistorySync ? (
-                <Button size="small" icon={<ReloadOutlined />} loading={historySyncing} onClick={() => runSafely(syncHistory())}>
-                  后台补齐历史K线
+                <Button size="small" icon={<DatabaseOutlined />} onClick={() => navigate('/data')}>
+                  全市场补齐K线
                 </Button>
               ) : undefined
             }

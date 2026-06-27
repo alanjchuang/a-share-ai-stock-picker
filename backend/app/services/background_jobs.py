@@ -15,7 +15,7 @@ from app.services.market_data_service import MarketDataService
 from app.services.sentiment_service import SentimentService
 
 
-JobTask = Callable[[sqlite3.Connection], dict[str, Any]]
+JobTask = Callable[[sqlite3.Connection, int], dict[str, Any]]
 SuccessMessage = Callable[[dict[str, Any]], str]
 
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stock-background-job")
@@ -93,7 +93,7 @@ def _run_with_acquired_lock(
     try:
         conn = get_connection()
         _update_job(conn, job_id, "running", running_message)
-        result = task(conn)
+        result = task(conn, job_id)
         _update_job(conn, job_id, "success", success_message(result), finished=True)
     except Exception as exc:
         if conn:
@@ -158,7 +158,7 @@ def run_exclusive_db_job_now(
     try:
         conn = get_connection()
         job_id = _insert_job(conn, job_type, "running", running_message)
-        result = task(conn)
+        result = task(conn, job_id)
         message = success_message(result)
         _update_job(conn, job_id, "success", message, finished=True)
         return {"accepted": True, "job_id": job_id, "job_type": job_type, "status": "success", "message": message}
@@ -175,7 +175,7 @@ def run_exclusive_db_job_now(
 
 
 def _sync_task(payload: SyncRequest) -> JobTask:
-    def task(conn: sqlite3.Connection) -> dict[str, Any]:
+    def task(conn: sqlite3.Connection, _: int) -> dict[str, Any]:
         sync_result = MarketDataService(conn).sync(payload)
         quality_result = DataQualityService(conn).clean_mixed_demo_rows()
         sentiment_count = SentimentService(conn).batch_refresh_existing(limit=300)
@@ -186,7 +186,7 @@ def _sync_task(payload: SyncRequest) -> JobTask:
 
 
 def _factor_task(force: bool) -> JobTask:
-    def task(conn: sqlite3.Connection) -> dict[str, Any]:
+    def task(conn: sqlite3.Connection, _: int) -> dict[str, Any]:
         rows = FactorEngine(conn).calculate_all(force=force)
         return {"factor_count": len(rows)}
 
@@ -194,8 +194,27 @@ def _factor_task(force: bool) -> JobTask:
 
 
 def _stock_history_task(ts_code: str) -> JobTask:
-    def task(conn: sqlite3.Connection) -> dict[str, Any]:
+    def task(conn: sqlite3.Connection, _: int) -> dict[str, Any]:
         sync_result = AkshareService(conn).sync_stock_history(ts_code)
+        quality_result = DataQualityService(conn).clean_mixed_demo_rows()
+        factor_rows = FactorEngine(conn).calculate_all(force=True)
+        return {"sync": sync_result, "quality": quality_result, "factor_count": len(factor_rows)}
+
+    return task
+
+
+def _all_stock_history_task() -> JobTask:
+    def task(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
+        def progress(done: int, total: int, ts_code: str, rows: int, skipped: int) -> None:
+            percent = round(done / max(total, 1) * 100, 1)
+            _update_job(
+                conn,
+                job_id,
+                "running",
+                f"正在全市场补齐历史K线：{done}/{total}（{percent}%），当前 {ts_code}，已写入 {rows} 条，跳过 {skipped} 只。",
+            )
+
+        sync_result = AkshareService(conn).sync_all_stock_history(progress=progress)
         quality_result = DataQualityService(conn).clean_mixed_demo_rows()
         factor_rows = FactorEngine(conn).calculate_all(force=True)
         return {"sync": sync_result, "quality": quality_result, "factor_count": len(factor_rows)}
@@ -232,6 +251,23 @@ def submit_stock_history_job(ts_code: str) -> dict[str, Any]:
         lambda result: (
             f"{ts_code} 历史K线补齐完成，新增/覆盖 "
             f"{result.get('sync', {}).get('rows', 0)} 条K线，因子缓存覆盖 {result.get('factor_count', 0)} 只股票。"
+        ),
+    )
+
+
+def submit_all_stock_history_job() -> dict[str, Any]:
+    return submit_exclusive_db_job(
+        "all_stock_history_sync",
+        "全市场历史K线补齐已进入后台队列，选股会继续读取上一版因子缓存。",
+        "正在全市场补齐历史K线，完成后会自动重算因子缓存。",
+        _all_stock_history_task(),
+        lambda result: (
+            "全市场历史K线补齐完成："
+            f"拉取 {result.get('sync', {}).get('fetched_symbols', 0)} 只，"
+            f"跳过 {result.get('sync', {}).get('skipped_symbols', 0)} 只，"
+            f"失败 {result.get('sync', {}).get('failed_symbols', 0)} 只，"
+            f"写入/覆盖 {result.get('sync', {}).get('rows', 0)} 条K线，"
+            f"因子缓存覆盖 {result.get('factor_count', 0)} 只股票。"
         ),
     )
 

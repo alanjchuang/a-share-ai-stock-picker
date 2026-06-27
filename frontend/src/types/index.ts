@@ -392,6 +392,8 @@ export interface StockSelectionWorkflowResult {
   screening_result?: ScreeningResult | null;
   llm_analysis: Record<string, unknown>;
   raw_conditions: Record<string, unknown>;
+  tool_calls: Array<Record<string, unknown>>;
+  parse_warnings: string[];
   steps: WorkflowStepTrace[];
 }
 
@@ -546,6 +548,7 @@ export interface AppConfig {
     default_start_date: string;
     default_end_date: string;
     max_history_symbols: number;
+    history_min_rows: number;
     max_financial_symbols: number;
     max_news_symbols: number;
     max_metadata_symbols: number;

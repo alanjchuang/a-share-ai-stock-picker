@@ -152,6 +152,7 @@ export const api = {
       method: 'POST',
       data: { provider, sync_news: true, sync_fundamentals: true, sync_indices: true }
     }),
+  syncAllStockHistory: () => request<BackgroundJobResponse>({ url: '/sync/history/all', method: 'POST' }),
   calculateFactors: () => request<BackgroundJobResponse>({ url: '/factors/calculate', method: 'POST' }),
   listWatchlistGroups: () => request<WatchlistGroup[]>({ url: '/watchlists/groups', method: 'GET' }),
   createWatchlistGroup: (data: { name: string; description?: string; color?: string; sort_order?: number }) =>

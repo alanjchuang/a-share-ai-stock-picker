@@ -110,7 +110,8 @@ const SystemConfig = () => {
               <ProFormText name={['akshare', 'default_start_date']} label="默认开始日期" width="sm" />
               <ProFormText name={['akshare', 'default_end_date']} label="默认结束日期" width="sm" />
               <ProFormDigit name={['akshare', 'request_interval_seconds']} label="请求间隔秒" min={0} fieldProps={{ step: 0.05 }} />
-              <ProFormDigit name={['akshare', 'max_history_symbols']} label="历史K线股票上限" min={0} />
+              <ProFormDigit name={['akshare', 'max_history_symbols']} label="批量历史上限" min={0} tooltip="0 表示常规同步也拉取全市场历史K线" />
+              <ProFormDigit name={['akshare', 'history_min_rows']} label="K线达标条数" min={30} />
               <ProFormDigit name={['akshare', 'max_financial_symbols']} label="财务指标股票上限" min={0} />
               <ProFormDigit name={['akshare', 'max_news_symbols']} label="新闻股票上限" min={0} />
               <ProFormDigit name={['akshare', 'max_metadata_symbols']} label="基础信息股票上限" min={0} />

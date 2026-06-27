@@ -41,7 +41,8 @@ class AkshareConfig:
     request_interval_seconds: float = 0.4
     default_start_date: str = "20240101"
     default_end_date: str = ""
-    max_history_symbols: int = 80
+    max_history_symbols: int = 0
+    history_min_rows: int = 120
     max_financial_symbols: int = 80
     max_news_symbols: int = 50
     max_metadata_symbols: int = 80

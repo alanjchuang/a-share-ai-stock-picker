@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from app.core.response import ApiResponse, ok
 from app.db.database import get_db
 from app.models.schemas import SyncRequest
-from app.services.background_jobs import submit_sync_refresh_job
+from app.services.background_jobs import submit_all_stock_history_job, submit_sync_refresh_job
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
@@ -14,6 +14,13 @@ router = APIRouter(prefix="/api/sync", tags=["sync"])
 def run_sync(payload: SyncRequest) -> ApiResponse[dict[str, Any]]:
     job = submit_sync_refresh_job(payload)
     message = job["message"] if not job["accepted"] else "数据同步与因子刷新已在后台启动"
+    return ok(job, message)
+
+
+@router.post("/history/all", response_model=ApiResponse[dict[str, Any]])
+def run_all_history_sync() -> ApiResponse[dict[str, Any]]:
+    job = submit_all_stock_history_job()
+    message = job["message"] if not job["accepted"] else "全市场历史K线补齐已在后台启动"
     return ok(job, message)
 
 
