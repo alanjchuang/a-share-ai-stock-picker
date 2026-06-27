@@ -14,6 +14,7 @@ import {
   Input,
   Modal,
   Select,
+  Segmented,
   Space,
   Switch,
   Tag,
@@ -29,7 +30,7 @@ import * as XLSX from 'xlsx';
 import FactorCharts from '../components/FactorCharts';
 import { api, defaultScreeningRequest } from '../api/modules';
 import { useAppStore } from '../store/useAppStore';
-import type { IndexMeta, ScreeningRequest, ScreeningResult, StockDetail, StockScore, WorkflowInfo } from '../types';
+import type { IndexMeta, ScreeningRequest, ScreeningResult, StockDetail, StockScore, WorkflowInfo, WorkbenchMode } from '../types';
 
 const ratingColor: Record<string, string> = {
   A: 'green',
@@ -37,6 +38,8 @@ const ratingColor: Record<string, string> = {
   C: 'gold',
   D: 'red'
 };
+
+type BeginnerPreset = 'balanced' | 'value' | 'growth' | 'sentiment';
 
 function normalizeRequest(values: Partial<ScreeningRequest>): ScreeningRequest {
   return {
@@ -69,12 +72,15 @@ const Workbench = () => {
   const navigate = useNavigate();
   const setCurrentRequest = useAppStore((state) => state.setCurrentRequest);
   const setLatestResult = useAppStore((state) => state.setLatestResult);
+  const workbenchMode = useAppStore((state) => state.workbenchMode);
+  const setWorkbenchMode = useAppStore((state) => state.setWorkbenchMode);
   const latestResult = useAppStore((state) => state.latestResult);
   const [indices, setIndices] = useState<IndexMeta[]>([]);
   const [result, setResult] = useState<ScreeningResult | null>(latestResult);
   const [selected, setSelected] = useState<StockScore | null>(null);
   const [stockDetail, setStockDetail] = useState<StockDetail | null>(null);
   const [aiText, setAiText] = useState('');
+  const [beginnerPreset, setBeginnerPreset] = useState<BeginnerPreset>('balanced');
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [selectedWorkflowPath, setSelectedWorkflowPath] = useState<string | undefined>();
   const [saveOpen, setSaveOpen] = useState(false);
@@ -102,6 +108,41 @@ const Workbench = () => {
       })),
     [indices]
   );
+
+  function beginnerRequest(preset: BeginnerPreset): ScreeningRequest {
+    const base = normalizeRequest(defaultScreeningRequest);
+    const presets: Record<BeginnerPreset, Partial<ScreeningRequest>> = {
+      balanced: {
+        fundamental: { roe: { min: 8, max: null }, pe_ttm: { min: null, max: 45 } },
+        sentiment: { ...base.sentiment, days: 7, min_avg_score: 50 },
+        weights: { fundamental: 35, technical: 25, capital: 20, sentiment: 20 },
+        limit: 80
+      },
+      value: {
+        fundamental: { pe_ttm: { min: null, max: 25 }, pb: { min: null, max: 3 }, roe: { min: 10, max: null } },
+        weights: { fundamental: 50, technical: 15, capital: 20, sentiment: 15 },
+        limit: 80
+      },
+      growth: {
+        fundamental: { revenue_yoy: { min: 12, max: null }, roe: { min: 8, max: null } },
+        technical: { ...base.technical, above_ma: [20], pct_chg_n: { min: 0, max: null }, pct_chg_days: 20 },
+        weights: { fundamental: 30, technical: 35, capital: 20, sentiment: 15 },
+        limit: 80
+      },
+      sentiment: {
+        sentiment: { ...base.sentiment, days: 7, min_avg_score: 65, blacklist_keywords: ['退市', '立案', '减持', '问询函'] },
+        capital: { main_net_inflow_min: 0 },
+        weights: { fundamental: 20, technical: 20, capital: 20, sentiment: 40 },
+        limit: 80
+      }
+    };
+    return normalizeRequest({
+      ...base,
+      ...presets[preset],
+      filters: { ...base.filters, exclude_st: true, exclude_paused: true, new_stock_days: 180 },
+      logic: 'and'
+    });
+  }
 
   const columns: ProColumns<StockScore>[] = [
     {
@@ -245,7 +286,8 @@ const Workbench = () => {
   }
 
   return (
-    <div className="workbench-grid">
+    <div className={workbenchMode === 'professional' ? 'workbench-grid' : 'workbench-grid beginner'}>
+      {workbenchMode === 'professional' ? (
       <ProCard className="filter-panel" title="筛选条件" bordered>
         <ProForm<ScreeningRequest> form={form} submitter={false} layout="vertical">
           <ProFormSelect name={['index', 'index_codes']} label="指数池" mode="multiple" options={indexOptions} fieldProps={{ showSearch: true }} />
@@ -321,20 +363,57 @@ const Workbench = () => {
           </Space.Compact>
         </ProForm>
       </ProCard>
+      ) : (
+        <ProCard className="filter-panel" title="新手模式" bordered>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Segmented
+              block
+              value={beginnerPreset}
+              onChange={(value) => setBeginnerPreset(value as BeginnerPreset)}
+              options={[
+                { label: '均衡', value: 'balanced' },
+                { label: '价值', value: 'value' },
+                { label: '成长', value: 'growth' },
+                { label: '舆情', value: 'sentiment' }
+              ]}
+            />
+            <Button type="primary" block icon={<PlayCircleOutlined />} onClick={() => void run(beginnerRequest(beginnerPreset))}>
+              执行新手筛选
+            </Button>
+            <Button block onClick={() => setWorkbenchMode('professional')}>
+              切到专业模式
+            </Button>
+            <Typography.Text type="secondary">当前预设会自动剔除ST、停牌和次新股。</Typography.Text>
+          </Space>
+        </ProCard>
+      )}
       <Space direction="vertical" size={16} style={{ width: '100%', minWidth: 0 }}>
         <ProCard bordered>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Select
-              value={selectedWorkflowPath}
-              onChange={setSelectedWorkflowPath}
-              options={workflows.map((item) => ({
-                label: item.name || item.path,
-                value: item.path
-              }))}
-              placeholder="选择AI选股Workflow"
-              style={{ width: 320, maxWidth: '100%' }}
-              allowClear
-            />
+            <div className="toolbar-row">
+              <Space wrap>
+                <Segmented<WorkbenchMode>
+                  value={workbenchMode}
+                  onChange={setWorkbenchMode}
+                  options={[
+                    { label: '新手模式', value: 'beginner' },
+                    { label: '专业模式', value: 'professional' }
+                  ]}
+                />
+                <Select
+                  value={selectedWorkflowPath}
+                  onChange={setSelectedWorkflowPath}
+                  options={workflows.map((item) => ({
+                    label: item.name || item.path,
+                    value: item.path
+                  }))}
+                  placeholder="选择AI选股Workflow"
+                  style={{ width: 320, maxWidth: '100%' }}
+                  allowClear
+                />
+              </Space>
+              <Typography.Text type="secondary">最新交易日：{result?.latest_trade_date ?? '-'}</Typography.Text>
+            </div>
             <Input.TextArea
               value={aiText}
               onChange={(event) => setAiText(event.target.value)}
@@ -364,7 +443,6 @@ const Workbench = () => {
                   刷新数据
                 </Button>
               </Space>
-              <Typography.Text type="secondary">最新交易日：{result?.latest_trade_date ?? '-'}</Typography.Text>
             </div>
           </Space>
         </ProCard>

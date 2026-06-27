@@ -1,12 +1,14 @@
 import { create } from 'zustand';
-import type { ScreeningRequest, ScreeningResult, ThemeMode } from '../types';
+import type { ScreeningRequest, ScreeningResult, ThemeMode, WorkbenchMode } from '../types';
 
 interface AppState {
   themeMode: ThemeMode;
+  workbenchMode: WorkbenchMode;
   globalLoading: boolean;
   currentRequest: ScreeningRequest | null;
   latestResult: ScreeningResult | null;
   setThemeMode: (themeMode: ThemeMode) => void;
+  setWorkbenchMode: (workbenchMode: WorkbenchMode) => void;
   setGlobalLoading: (loading: boolean) => void;
   setCurrentRequest: (request: ScreeningRequest) => void;
   setLatestResult: (result: ScreeningResult) => void;
@@ -14,12 +16,17 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   themeMode: (localStorage.getItem('a-share-theme') as ThemeMode | null) ?? 'light',
+  workbenchMode: (localStorage.getItem('a-share-workbench-mode') as WorkbenchMode | null) ?? 'beginner',
   globalLoading: false,
   currentRequest: null,
   latestResult: null,
   setThemeMode: (themeMode) => {
     localStorage.setItem('a-share-theme', themeMode);
     set({ themeMode });
+  },
+  setWorkbenchMode: (workbenchMode) => {
+    localStorage.setItem('a-share-workbench-mode', workbenchMode);
+    set({ workbenchMode });
   },
   setGlobalLoading: (globalLoading) => set({ globalLoading }),
   setCurrentRequest: (currentRequest) => set({ currentRequest }),

@@ -2,6 +2,7 @@ export type LogicMode = 'and' | 'or';
 export type Rating = 'A' | 'B' | 'C' | 'D';
 export type CrossSignal = 'golden' | 'dead';
 export type ThemeMode = 'light' | 'dark';
+export type WorkbenchMode = 'beginner' | 'professional';
 
 export interface ApiResponse<T> {
   code: number;
