@@ -25,15 +25,33 @@ function pct(numerator?: number | null, denominator?: number | null): number {
 const DataCenter = () => {
   const [health, setHealth] = useState<DataHealthResponse | null>(null);
   const [jobs, setJobs] = useState<SyncJobOut[]>([]);
+  const [activeJob, setActiveJob] = useState<SyncJobOut | null>(null);
   const stockCount = useMemo(() => health?.tables.find((item) => item.key === 'stocks')?.row_count ?? 0, [health?.tables]);
   const activeJobs = useMemo(() => jobs.filter((item) => ['queued', 'running', 'cancel_requested'].includes(item.status)), [jobs]);
-  const hasRunningJob = activeJobs.length > 0;
-  const primaryActiveJob = activeJobs[0];
+  const primaryActiveJob = activeJob ?? activeJobs[0];
+  const hasRunningJob = Boolean(primaryActiveJob);
+
+  function mergeJob(job: SyncJobOut): void {
+    setJobs((items) => [job, ...items.filter((item) => item.id !== job.id)].slice(0, 50));
+  }
 
   async function load(): Promise<void> {
     const [nextHealth, nextJobs] = await Promise.all([api.getDataHealth(), api.listSyncJobs()]);
     setHealth(nextHealth);
     setJobs(nextJobs);
+    setActiveJob(nextJobs.find((item) => ['queued', 'running', 'cancel_requested'].includes(item.status)) ?? null);
+  }
+
+  async function pollActiveJob(): Promise<void> {
+    const nextActiveJob = await api.getActiveSyncJob();
+    setActiveJob(nextActiveJob);
+    if (nextActiveJob) {
+      mergeJob(nextActiveJob);
+      return;
+    }
+    if (primaryActiveJob) {
+      await load();
+    }
   }
 
   async function sync(): Promise<void> {
@@ -67,10 +85,10 @@ const DataCenter = () => {
   useEffect(() => {
     if (!hasRunningJob) return undefined;
     const timer = window.setInterval(() => {
-      runSafely(load());
-    }, 5000);
+      runSafely(pollActiveJob());
+    }, 3000);
     return () => window.clearInterval(timer);
-  }, [hasRunningJob]);
+  }, [hasRunningJob, primaryActiveJob?.id]);
 
   const tableColumns: ProColumns<DataTableStatus>[] = [
     { title: '数据集', dataIndex: 'name', width: 140, fixed: 'left' },

@@ -3,9 +3,11 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timedelta
 from threading import Event, Lock
 from typing import Any
 
+from app.core.config import load_settings
 from app.db.database import get_connection
 from app.models.schemas import SyncRequest
 from app.services.akshare_service import AkshareService
@@ -14,6 +16,7 @@ from app.services.factor_engine import FactorEngine
 from app.services.data_quality_service import DataQualityService
 from app.services.market_data_service import MarketDataService
 from app.services.sentiment_service import SentimentService
+from app.services.stock_news_search_service import StockNewsSearchService
 
 
 JobTask = Callable[[sqlite3.Connection, int], dict[str, Any]]
@@ -291,17 +294,46 @@ def run_exclusive_db_job_now(
 
 def _sync_task(payload: SyncRequest) -> JobTask:
     def task(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
-        check_cancel = _cancel_checker(conn, job_id)
-        sync_result = MarketDataService(conn).sync(payload, cancel_check=check_cancel)
-        check_cancel()
-        quality_result = DataQualityService(conn).clean_mixed_demo_rows()
-        check_cancel()
-        sentiment_count = SentimentService(conn).batch_refresh_existing(limit=300, cancel_check=check_cancel)
-        check_cancel()
-        factor_rows = FactorEngine(conn).calculate_all(force=True, cancel_check=check_cancel)
-        return {"sync": sync_result, "quality": quality_result, "sentiment_count": sentiment_count, "factor_count": len(factor_rows)}
+        return _run_sync_pipeline(conn, job_id, payload)
 
     return task
+
+
+def _incremental_sync_task() -> JobTask:
+    def task(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
+        payload = _incremental_sync_request(conn)
+        result = _run_sync_pipeline(conn, job_id, payload)
+        result["incremental_start_date"] = payload.start_date
+        return result
+
+    return task
+
+
+def _run_sync_pipeline(conn: sqlite3.Connection, job_id: int, payload: SyncRequest) -> dict[str, Any]:
+    check_cancel = _cancel_checker(conn, job_id)
+    sync_result = MarketDataService(conn).sync(payload, cancel_check=check_cancel)
+    check_cancel()
+    quality_result = DataQualityService(conn).clean_mixed_demo_rows()
+    check_cancel()
+    sentiment_count = SentimentService(conn).batch_refresh_existing(limit=300, cancel_check=check_cancel)
+    check_cancel()
+    factor_rows = FactorEngine(conn).calculate_all(force=True, cancel_check=check_cancel)
+    return {"sync": sync_result, "quality": quality_result, "sentiment_count": sentiment_count, "factor_count": len(factor_rows)}
+
+
+def _incremental_sync_request(conn: sqlite3.Connection) -> SyncRequest:
+    settings = load_settings()
+    latest = conn.execute("SELECT MAX(trade_date) FROM stock_daily").fetchone()[0]
+    fallback_start = settings.akshare.default_start_date or settings.tushare.default_start_date
+    start_date = fallback_start
+    if latest:
+        try:
+            latest_date = datetime.strptime(str(latest), "%Y%m%d").date()
+            lookback_days = max(int(settings.scheduler.incremental_sync_lookback_days or 0), 0)
+            start_date = (latest_date - timedelta(days=lookback_days)).strftime("%Y%m%d")
+        except ValueError:
+            start_date = fallback_start
+    return SyncRequest(start_date=start_date, sync_news=True, sync_fundamentals=True, sync_indices=True)
 
 
 def _factor_task(force: bool) -> JobTask:
@@ -322,6 +354,50 @@ def _stock_history_task(ts_code: str) -> JobTask:
         check_cancel()
         factor_rows = FactorEngine(conn).calculate_all(force=True, cancel_check=check_cancel)
         return {"sync": sync_result, "quality": quality_result, "factor_count": len(factor_rows)}
+
+    return task
+
+
+def _stock_detail_refresh_task(ts_code: str) -> JobTask:
+    def task(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
+        check_cancel = _cancel_checker(conn, job_id)
+        normalized = ts_code.strip().upper()
+
+        _update_job(conn, job_id, "running", f"正在更新 {normalized} 的行情、K线、财务和资金数据。")
+        sync_result = AkshareService(conn).sync_stock_detail(normalized, cancel_check=check_cancel)
+        normalized = str(sync_result.get("ts_code") or normalized)
+        check_cancel()
+
+        stock_row = conn.execute("SELECT name FROM stocks WHERE ts_code = ?", (normalized,)).fetchone()
+        stock_name = str(stock_row["name"] or normalized) if stock_row else normalized
+        search_result: dict[str, Any] = {"inserted": 0, "skipped": True}
+        try:
+            _update_job(conn, job_id, "running", f"正在补齐 {normalized} 的近15日新闻、公告并快速刷新舆情评分。")
+            inserted = StockNewsSearchService(conn).refresh_from_search(normalized, stock_name, days=15)
+            search_result = {"inserted": inserted, "skipped": False}
+        except Exception as exc:
+            search_result = {"inserted": 0, "skipped": True, "warning": str(exc)}
+        check_cancel()
+
+        sentiment_result = SentimentService(conn).refresh_stock_news(
+            normalized,
+            limit=40,
+            cancel_check=check_cancel,
+            prefer_llm=False,
+        )
+        check_cancel()
+        quality_result = DataQualityService(conn).clean_mixed_demo_rows()
+        check_cancel()
+
+        _update_job(conn, job_id, "running", f"正在重算 {normalized} 的最新因子评分。")
+        factor_row = FactorEngine(conn).calculate_one(normalized, cancel_check=check_cancel)
+        return {
+            "sync": sync_result,
+            "search": search_result,
+            "sentiment": sentiment_result,
+            "quality": quality_result,
+            "factor": {"ts_code": normalized, "ai_score": factor_row.get("ai_score"), "rating": factor_row.get("rating")},
+        }
 
     return task
 
@@ -378,6 +454,19 @@ def submit_sync_refresh_job(payload: SyncRequest) -> dict[str, Any]:
     )
 
 
+def submit_incremental_sync_job(job_type: str = "continuous_incremental_sync") -> dict[str, Any]:
+    return submit_exclusive_db_job(
+        job_type,
+        "增量数据同步已进入后台队列，前台继续使用现有缓存。",
+        "正在后台同步最新行情、财务、资金、新闻并刷新因子缓存。",
+        _incremental_sync_task(),
+        lambda result: (
+            f"增量同步完成（起始 {result.get('incremental_start_date') or '-'}），"
+            f"因子缓存覆盖 {result.get('factor_count', 0)} 只股票。"
+        ),
+    )
+
+
 def submit_factor_refresh_job(force: bool = True, job_type: str = "manual_factor_refresh") -> dict[str, Any]:
     return submit_exclusive_db_job(
         job_type,
@@ -397,6 +486,24 @@ def submit_stock_history_job(ts_code: str) -> dict[str, Any]:
         lambda result: (
             f"{ts_code} 历史K线补齐完成，新增/覆盖 "
             f"{result.get('sync', {}).get('rows', 0)} 条K线，因子缓存覆盖 {result.get('factor_count', 0)} 只股票。"
+        ),
+    )
+
+
+def submit_stock_detail_refresh_job(ts_code: str) -> dict[str, Any]:
+    normalized = ts_code.strip().upper()
+    return submit_exclusive_db_job(
+        "stock_detail_refresh",
+        f"{normalized} 最新信息更新已进入后台队列。",
+        f"正在后台更新 {normalized} 的行情、财务、资金、新闻和因子评分。",
+        _stock_detail_refresh_task(normalized),
+        lambda result: (
+            f"{normalized} 最新信息已更新："
+            f"K线 {result.get('sync', {}).get('tables', {}).get('history', 0)} 条，"
+            f"财务 {result.get('sync', {}).get('tables', {}).get('financial_indicators', 0)} 条，"
+            f"资金 {result.get('sync', {}).get('tables', {}).get('capital_flows', 0)} 条，"
+            f"新闻 {result.get('sync', {}).get('tables', {}).get('news', 0) + result.get('search', {}).get('inserted', 0)} 条，"
+            f"舆情更新 {result.get('sentiment', {}).get('updated', 0)} 条。"
         ),
     )
 
@@ -440,6 +547,10 @@ def run_scheduled_sync_job() -> dict[str, Any]:
         _sync_task(SyncRequest()),
         lambda result: f"每日同步完成，因子缓存覆盖 {result.get('factor_count', 0)} 只股票。",
     )
+
+
+def run_scheduled_incremental_sync_job() -> dict[str, Any]:
+    return submit_incremental_sync_job()
 
 
 def run_scheduled_factor_cache_job() -> dict[str, Any]:

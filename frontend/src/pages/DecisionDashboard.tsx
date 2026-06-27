@@ -64,8 +64,8 @@ const DecisionDashboard = () => {
   const navigate = useNavigate();
   const [data, setData] = useState<DecisionDashboardResponse | null>(null);
 
-  async function load(): Promise<void> {
-    setData(await api.getDecisionDashboard(8));
+  async function load(forceRefresh = false): Promise<void> {
+    setData(await api.getDecisionDashboard(8, { forceRefresh }));
   }
 
   useEffect(() => {
@@ -102,6 +102,7 @@ const DecisionDashboard = () => {
       title: '操作',
       valueType: 'option',
       width: 86,
+      fixed: 'right',
       render: (_, record) => <StockLlmAnalysisButton tsCode={record.ts_code} name={record.name} />
     }
   ];
@@ -128,7 +129,7 @@ const DecisionDashboard = () => {
     <PageContainer
       title="决策仪表盘"
       extra={[
-        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(load())}>
+        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(load(true))}>
           刷新
         </Button>
       ]}
@@ -161,10 +162,10 @@ const DecisionDashboard = () => {
           </Space>
         </ProCard>
         <div className="dashboard-grid">
-          <ProTable<StockScore> rowKey="ts_code" cardBordered search={false} options={false} size="small" columns={stockColumns} dataSource={data?.top_ai ?? []} pagination={false} headerTitle="AI评分靠前" />
-          <ProTable<StockScore> rowKey="ts_code" cardBordered search={false} options={false} size="small" columns={stockColumns} dataSource={data?.top_gainers ?? []} pagination={false} headerTitle="涨幅靠前" />
-          <ProTable<IndustryHeatItem> rowKey="industry" cardBordered search={false} options={false} size="small" columns={industryColumns} dataSource={data?.industry_heat ?? []} pagination={false} headerTitle="行业强弱" />
-          <ProTable<StockScore> rowKey="ts_code" cardBordered search={false} options={false} size="small" columns={stockColumns} dataSource={data?.high_risk ?? []} pagination={false} headerTitle="风险复核" />
+          <ProTable<StockScore> rowKey="ts_code" cardBordered search={false} options={false} size="small" columns={stockColumns} dataSource={data?.top_ai ?? []} pagination={false} headerTitle="AI评分靠前" scroll={{ x: 720 }} />
+          <ProTable<StockScore> rowKey="ts_code" cardBordered search={false} options={false} size="small" columns={stockColumns} dataSource={data?.top_gainers ?? []} pagination={false} headerTitle="涨幅靠前" scroll={{ x: 720 }} />
+          <ProTable<IndustryHeatItem> rowKey="industry" cardBordered search={false} options={false} size="small" columns={industryColumns} dataSource={data?.industry_heat ?? []} pagination={false} headerTitle="行业强弱" scroll={{ x: 520 }} />
+          <ProTable<StockScore> rowKey="ts_code" cardBordered search={false} options={false} size="small" columns={stockColumns} dataSource={data?.high_risk ?? []} pagination={false} headerTitle="风险复核" scroll={{ x: 720 }} />
         </div>
       </Space>
     </PageContainer>

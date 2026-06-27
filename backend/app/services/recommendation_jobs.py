@@ -15,6 +15,8 @@ _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="recommendation
 _state_lock = Lock()
 _active_future: Future[None] | None = None
 _active_job_id: int | None = None
+_STALE_JOB_MINUTES = 30
+_STALE_JOB_MESSAGE = "一键荐股任务已中断或服务重启，请重新发起。"
 
 
 def submit_one_click_recommendation_job(payload: OneClickRecommendRequest) -> dict[str, Any]:
@@ -32,6 +34,7 @@ def submit_one_click_recommendation_job(payload: OneClickRecommendRequest) -> di
         try:
             conn = get_connection()
             _ensure_table(conn)
+            _expire_stale_jobs(conn)
             job_id = _insert_job(conn, payload)
         finally:
             if conn:
@@ -52,8 +55,31 @@ def get_one_click_recommendation_job(job_id: int) -> dict[str, Any] | None:
     try:
         conn = get_connection()
         _ensure_table(conn)
+        _expire_stale_jobs(conn)
         row = conn.execute("SELECT * FROM recommendation_jobs WHERE id = ?", (job_id,)).fetchone()
         return _job_out(dict(row)) if row else None
+    finally:
+        if conn:
+            conn.close()
+
+
+def list_one_click_recommendation_jobs(limit: int = 20) -> list[dict[str, Any]]:
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = get_connection()
+        _ensure_table(conn)
+        _expire_stale_jobs(conn)
+        safe_limit = min(max(int(limit or 20), 1), 100)
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM recommendation_jobs
+            ORDER BY started_at DESC, id DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+        return [_job_out(dict(row)) for row in rows]
     finally:
         if conn:
             conn.close()
@@ -100,6 +126,22 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_recommendation_jobs_status_started ON recommendation_jobs(status, started_at)")
+    conn.commit()
+
+
+def _expire_stale_jobs(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        UPDATE recommendation_jobs
+        SET status='failed',
+            message=?,
+            finished_at=CURRENT_TIMESTAMP
+        WHERE status IN ('queued', 'running')
+          AND finished_at IS NULL
+          AND datetime(started_at) <= datetime('now', ?)
+        """,
+        (_STALE_JOB_MESSAGE, f"-{_STALE_JOB_MINUTES} minutes"),
+    )
     conn.commit()
 
 

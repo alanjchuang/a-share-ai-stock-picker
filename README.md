@@ -44,7 +44,7 @@ chmod +x start.sh stop.sh
 - `[workflow] default_path`：可留空；系统会从 `workflows/` 下读取可用 workflow。也可以在“系统配置”页设置默认 workflow，并在工作台运行 AI 选股前临时选择。
 - `[filters]`：全局剔除 ST、停牌、次新股阈值、最小市值。
 - `[weights]`：基本面、技术、资金、舆情四维度综合 AI 评分权重。
-- `[scheduler] daily_sync_cron`：默认交易日 18:30 执行本地同步任务。
+- `[scheduler] daily_sync_cron`：默认交易日 18:30 执行本地同步任务；`startup_sync_enabled` 会在服务启动后自动触发一次增量同步，`incremental_sync_minutes` 控制后台持续追新间隔，`incremental_sync_lookback_days` 用于从最新交易日前回看数日补齐漏数。
 
 大模型可选依赖：
 

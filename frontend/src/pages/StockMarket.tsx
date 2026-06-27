@@ -73,7 +73,7 @@ const StockMarket = () => {
     [market?.industries]
   );
 
-  async function loadMarket(): Promise<void> {
+  async function loadMarket(forceRefresh = false): Promise<void> {
     const data = await api.listStockMarket({
       q: query,
       industry,
@@ -84,7 +84,7 @@ const StockMarket = () => {
       page_size: pageSize,
       sort_by: sortBy,
       sort_order: sortOrder
-    });
+    }, { forceRefresh });
     setMarket(data);
     setSelectedCodes([]);
   }
@@ -212,7 +212,7 @@ const StockMarket = () => {
         <Button key="batch" type="primary" disabled={!selectedCodes.length} icon={<PlusOutlined />} onClick={() => runSafely(batchAddToWatchlist())}>
           批量加入自选
         </Button>,
-        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(loadMarket())}>
+        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(loadMarket(true))}>
           刷新
         </Button>
       ]}

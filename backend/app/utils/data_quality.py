@@ -69,7 +69,9 @@ def sanitize_daily_frame(df: pd.DataFrame) -> DailyQualityResult:
     pct_chg = data["pct_chg"].fillna(0).astype(float).abs() if "pct_chg" in data.columns else pd.Series(0.0, index=data.index)
     pre_close_ratio = previous_close / reported_pre_close.replace(0, pd.NA)
     pre_close_ratio = pre_close_ratio.replace([float("inf"), float("-inf")], pd.NA)
-    scale_break = ((pre_close_ratio > 1.35) | (pre_close_ratio < 0.65)) & (pct_chg < 35)
+    trade_dates = pd.to_datetime(data["trade_date"].astype(str), format="%Y%m%d", errors="coerce")
+    date_gap_days = (trade_dates - trade_dates.shift(1)).dt.days.abs()
+    scale_break = ((pre_close_ratio > 1.25) | (pre_close_ratio < 0.8)) & (pct_chg < 35) & (date_gap_days <= 10)
     break_indices = data.index[scale_break.fillna(False)].tolist()
     for break_index in break_indices:
         position = data.index.get_loc(break_index)
@@ -79,10 +81,16 @@ def sanitize_daily_frame(df: pd.DataFrame) -> DailyQualityResult:
             continue
         before_amount = float(amount.loc[before_index].replace(0, pd.NA).dropna().median() or 0)
         after_amount = float(amount.loc[after_index].replace(0, pd.NA).dropna().median() or 0)
-        if len(after_index) <= 5 and before_amount > 0 and after_amount > before_amount * 20:
-            remove_mask.loc[before_index] = True
-        elif len(before_index) <= 5 and after_amount > 0 and before_amount > after_amount * 20:
+        if len(after_index) <= 5:
             remove_mask.loc[after_index] = True
+        elif len(before_index) <= 5 and after_amount > 0 and before_amount > after_amount * 20:
+            remove_mask.loc[before_index] = True
+        elif before_amount > 0 and after_amount > before_amount * 100:
+            remove_mask.loc[after_index[:1]] = True
+        elif after_amount > 0 and before_amount > after_amount * 100:
+            remove_mask.loc[before_index[-1:]] = True
+        else:
+            remove_mask.loc[break_index] = True
 
     next_close = data["close"].shift(-1)
     jump_from_prev = (data["close"] / previous_close.replace(0, pd.NA)).abs()

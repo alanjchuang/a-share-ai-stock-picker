@@ -1,14 +1,14 @@
-import { ArrowLeftOutlined, DatabaseOutlined, ReloadOutlined, StarOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, DatabaseOutlined, ReloadOutlined, StarOutlined, SyncOutlined } from '@ant-design/icons';
 import { Alert, Button, Descriptions, Empty, List, Space, Table, Tag, Typography } from 'antd';
 import { PageContainer, ProCard, StatisticCard } from '@ant-design/pro-components';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import type { ColumnsType } from 'antd/es/table';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/modules';
 import StockLlmAnalysisButton from '../components/StockLlmAnalysisButton';
-import type { FinancialSnapshot, StockDetail as StockDetailType } from '../types';
+import type { FinancialSnapshot, StockDetail as StockDetailType, SyncJobOut } from '../types';
 import { runSafely } from '../utils/async';
 import { notifySuccess } from '../utils/feedback';
 
@@ -102,12 +102,78 @@ const StockDetail = () => {
   const { tsCode } = useParams<{ tsCode: string }>();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<StockDetailType | null>(null);
+  const [refreshJob, setRefreshJob] = useState<SyncJobOut | null>(null);
+  const [refreshJobId, setRefreshJobId] = useState<number | null>(null);
+  const autoRefreshTsCodeRef = useRef<string | null>(null);
+
+  const refreshRunning = Boolean(refreshJob && ['queued', 'running', 'cancel_requested'].includes(refreshJob.status));
+
+  async function loadDetail(forceRefresh = false): Promise<void> {
+    if (!tsCode) return;
+    const data = await api.getStockDetail(tsCode, { forceRefresh });
+    setDetail(data);
+  }
 
   const load = () => {
-    if (tsCode) runSafely(api.getStockDetail(tsCode).then(setDetail));
+    runSafely(loadDetail(true));
   };
 
-  useEffect(load, [tsCode]);
+  async function triggerRefresh(showToast: boolean): Promise<void> {
+    if (!tsCode) return;
+    const job = await api.refreshStockDetail(tsCode);
+    if (showToast || !job.accepted) {
+      notifySuccess(job.message);
+    }
+    if (typeof job.job_id === 'number') {
+      setRefreshJob({
+        id: job.job_id,
+        job_type: job.job_type,
+        status: job.status,
+        message: job.message,
+        started_at: '',
+        finished_at: null
+      });
+      setRefreshJobId(job.job_id);
+    }
+  }
+
+  useEffect(() => {
+    if (!tsCode) return;
+    setDetail(null);
+    setRefreshJob(null);
+    setRefreshJobId(null);
+    runSafely(loadDetail());
+  }, [tsCode]);
+
+  useEffect(() => {
+    if (!tsCode || autoRefreshTsCodeRef.current === tsCode) return;
+    autoRefreshTsCodeRef.current = tsCode;
+    runSafely(triggerRefresh(false));
+  }, [tsCode]);
+
+  useEffect(() => {
+    if (!refreshJobId) return undefined;
+    const jobId = refreshJobId;
+    let stopped = false;
+    async function poll(): Promise<void> {
+      const job = await api.getSyncJob(jobId);
+      if (stopped) return;
+      setRefreshJob(job);
+      if (!['queued', 'running', 'cancel_requested'].includes(job.status)) {
+        setRefreshJobId(null);
+        if (job.job_type === 'stock_detail_refresh' && job.status === 'success') {
+          notifySuccess('个股最新信息已更新');
+          await loadDetail(true);
+        }
+      }
+    }
+    runSafely(poll());
+    const timer = window.setInterval(() => runSafely(poll()), 3000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [refreshJobId, tsCode]);
 
   const metricCards = useMemo(() => {
     if (!detail) return [];
@@ -156,6 +222,14 @@ const StockDetail = () => {
         <Button key="refresh" icon={<ReloadOutlined />} onClick={load}>
           刷新
         </Button>,
+        <Button
+          key="update"
+          icon={<SyncOutlined />}
+          loading={refreshRunning && refreshJob?.job_type === 'stock_detail_refresh'}
+          onClick={() => runSafely(triggerRefresh(true))}
+        >
+          更新最新信息
+        </Button>,
         <StockLlmAnalysisButton key="analysis" tsCode={detail?.base.ts_code ?? tsCode} name={detail?.base.name} buttonType="default" size="middle" label="LLM解析" />,
         <Button key="watch" type="primary" icon={<StarOutlined />} onClick={() => runSafely(addToWatchlist())} disabled={!detail}>
           加入自选
@@ -164,6 +238,21 @@ const StockDetail = () => {
     >
       {detail ? (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {refreshJob ? (
+            <Alert
+              showIcon
+              type={refreshJob.status === 'failed' ? 'error' : refreshRunning ? 'info' : refreshJob.status === 'success' ? 'success' : 'warning'}
+              message={refreshJob.job_type === 'stock_detail_refresh' ? '正在维护该股最新信息' : '后台数据任务正在运行'}
+              description={`#${refreshJob.id} ${refreshJob.message}`}
+              action={
+                !refreshRunning ? (
+                  <Button size="small" icon={<ReloadOutlined />} onClick={load}>
+                    刷新缓存
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : null}
           <Alert
             showIcon
             type={detail.data_warnings.length ? 'warning' : 'info'}

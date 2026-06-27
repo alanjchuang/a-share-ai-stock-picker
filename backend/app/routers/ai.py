@@ -17,7 +17,7 @@ from app.models.schemas import (
 )
 from app.services.market_prompt_service import MarketPromptService
 from app.services.nl_parser import NaturalLanguageParser
-from app.services.recommendation_jobs import get_one_click_recommendation_job, submit_one_click_recommendation_job
+from app.services.recommendation_jobs import get_one_click_recommendation_job, list_one_click_recommendation_jobs, submit_one_click_recommendation_job
 from app.services.sentiment_service import SentimentService
 from app.services.stock_selection_workflow import StockSelectionWorkflow
 from app.services.web_search_service import WebSearchService
@@ -45,6 +45,11 @@ def one_click_recommend(payload: OneClickRecommendRequest) -> ApiResponse[dict[s
     job = submit_one_click_recommendation_job(payload)
     message = "一键荐股已在后台启动" if job["accepted"] else job["message"]
     return ok(job, message)
+
+
+@router.get("/recommendations/one-click/jobs", response_model=ApiResponse[list[dict[str, object]]])
+def one_click_recommend_jobs(limit: int = 20) -> ApiResponse[list[dict[str, object]]]:
+    return ok(list_one_click_recommendation_jobs(limit=limit))
 
 
 @router.get("/recommendations/one-click/jobs/{job_id}", response_model=ApiResponse[dict[str, object]])

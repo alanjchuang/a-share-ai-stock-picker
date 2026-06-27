@@ -1,9 +1,12 @@
+from datetime import datetime
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.config import load_settings
-from app.services.background_jobs import run_scheduled_factor_cache_job, run_scheduled_sync_job
+from app.services.background_jobs import run_scheduled_factor_cache_job, run_scheduled_incremental_sync_job, run_scheduled_sync_job
 
 
 scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
@@ -15,6 +18,10 @@ def daily_sync_job() -> None:
 
 def factor_cache_refresh_job() -> None:
     run_scheduled_factor_cache_job()
+
+
+def incremental_sync_job() -> None:
+    run_scheduled_incremental_sync_job()
 
 
 def start_scheduler() -> None:
@@ -34,6 +41,25 @@ def start_scheduler() -> None:
             replace_existing=True,
             max_instances=1,
             coalesce=True,
+        )
+    incremental_minutes = int(settings.scheduler.incremental_sync_minutes or 0)
+    if incremental_minutes > 0:
+        scheduler.add_job(
+            incremental_sync_job,
+            trigger=IntervalTrigger(minutes=max(1, incremental_minutes), timezone="Asia/Shanghai"),
+            id="continuous_incremental_sync",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(scheduler.timezone) if settings.scheduler.startup_sync_enabled else None,
+        )
+    elif settings.scheduler.startup_sync_enabled:
+        scheduler.add_job(
+            incremental_sync_job,
+            trigger=DateTrigger(run_date=datetime.now(scheduler.timezone), timezone="Asia/Shanghai"),
+            id="startup_incremental_sync",
+            replace_existing=True,
+            max_instances=1,
         )
     scheduler.start()
 

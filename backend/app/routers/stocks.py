@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from app.core.response import ApiResponse, ok
 from app.db.database import get_db
 from app.models.schemas import StockDetail, StockLlmAnalysisResponse, StockMarketResponse
-from app.services.background_jobs import submit_stock_history_job
+from app.services.background_jobs import submit_stock_detail_refresh_job, submit_stock_history_job
 from app.services.stock_service import StockService
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
@@ -51,4 +51,11 @@ def llm_analysis(ts_code: str, conn=Depends(get_db)) -> ApiResponse[StockLlmAnal
 def sync_stock_history(ts_code: str) -> ApiResponse[dict]:
     job = submit_stock_history_job(ts_code)
     message = job["message"] if not job["accepted"] else "历史K线补齐已在后台启动"
+    return ok(job, message)
+
+
+@router.post("/{ts_code}/refresh", response_model=ApiResponse[dict])
+def refresh_stock_detail(ts_code: str) -> ApiResponse[dict]:
+    job = submit_stock_detail_refresh_job(ts_code)
+    message = job["message"] if not job["accepted"] else "个股最新信息更新已在后台启动"
     return ok(job, message)

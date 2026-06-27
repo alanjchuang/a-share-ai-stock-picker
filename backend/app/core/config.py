@@ -112,6 +112,9 @@ class SchedulerConfig:
     enabled: bool = True
     daily_sync_cron: str = "30 18 * * 1-5"
     factor_cache_refresh_minutes: int = 5
+    startup_sync_enabled: bool = True
+    incremental_sync_minutes: int = 30
+    incremental_sync_lookback_days: int = 7
 
 
 @dataclass

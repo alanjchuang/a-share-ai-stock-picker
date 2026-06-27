@@ -39,6 +39,14 @@ def active_job(conn=Depends(get_db)) -> ApiResponse[dict[str, Any] | None]:
     return ok(dict(row) if row else active)
 
 
+@router.get("/jobs/{job_id}", response_model=ApiResponse[dict[str, Any]])
+def job_detail(job_id: int, conn=Depends(get_db)) -> ApiResponse[dict[str, Any]]:
+    row = conn.execute("SELECT * FROM sync_jobs WHERE id = ?", (job_id,)).fetchone()
+    if not row:
+        raise ValueError("后台任务不存在")
+    return ok(dict(row))
+
+
 @router.post("/jobs/{job_id}/cancel", response_model=ApiResponse[dict[str, Any]])
 def cancel_job(job_id: int) -> ApiResponse[dict[str, Any]]:
     result = request_cancel_job(job_id)

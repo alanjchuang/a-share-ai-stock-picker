@@ -44,6 +44,9 @@ export interface DataHealthResponse {
   scheduler_enabled: boolean;
   daily_sync_cron: string;
   factor_cache_refresh_minutes: number;
+  startup_sync_enabled: boolean;
+  incremental_sync_minutes: number;
+  incremental_sync_lookback_days: number;
   latest_trade_date?: string | null;
   tables: DataTableStatus[];
   warnings: string[];
@@ -705,5 +708,8 @@ export interface AppConfig {
     enabled: boolean;
     daily_sync_cron: string;
     factor_cache_refresh_minutes: number;
+    startup_sync_enabled: boolean;
+    incremental_sync_minutes: number;
+    incremental_sync_lookback_days: number;
   };
 }

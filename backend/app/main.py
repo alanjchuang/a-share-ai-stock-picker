@@ -32,7 +32,9 @@ async def lifespan(_: FastAPI):
         needs_factor_refresh = existing < stock_count or bool(quality_result.get("deleted_daily"))
     finally:
         conn.close()
-    if needs_factor_refresh:
+    settings = load_settings()
+    startup_sync_will_refresh_factors = settings.scheduler.enabled and settings.scheduler.startup_sync_enabled
+    if needs_factor_refresh and not startup_sync_will_refresh_factors:
         submit_factor_refresh_job(force=True, job_type="startup_factor_refresh")
     start_scheduler()
     yield

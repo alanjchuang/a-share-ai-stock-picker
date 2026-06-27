@@ -94,7 +94,7 @@ const EtfCenter = () => {
     [market?.categories]
   );
 
-  async function load(): Promise<void> {
+  async function load(forceRefresh = false): Promise<void> {
     const data = await api.listEtfs({
       q: query,
       category,
@@ -102,7 +102,7 @@ const EtfCenter = () => {
       page_size: pageSize,
       sort_by: sortBy,
       sort_order: sortOrder
-    });
+    }, { forceRefresh });
     setMarket(data);
   }
 
@@ -111,7 +111,7 @@ const EtfCenter = () => {
     setActiveJob(job);
     if (!job && lastEtfJobId) {
       setLastEtfJobId(null);
-      await load();
+      await load(true);
     }
   }
 
@@ -138,9 +138,13 @@ const EtfCenter = () => {
 
   useEffect(() => {
     runSafely(loadActiveJob());
+  }, []);
+
+  useEffect(() => {
+    if (!activeJob && !lastEtfJobId) return undefined;
     const timer = window.setInterval(() => runSafely(loadActiveJob()), 3000);
     return () => window.clearInterval(timer);
-  }, [lastEtfJobId]);
+  }, [activeJob?.id, activeJob?.status, lastEtfJobId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -213,7 +217,7 @@ const EtfCenter = () => {
         <Button key="sync" type="primary" icon={<CloudDownloadOutlined />} loading={syncing || activeJob?.job_type === 'etf_sync'} disabled={Boolean(activeJob && activeJob.job_type !== 'etf_sync')} onClick={() => runSafely(syncEtfs())}>
           同步ETF数据
         </Button>,
-        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(load())}>
+        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(load(true))}>
           刷新
         </Button>
       ]}

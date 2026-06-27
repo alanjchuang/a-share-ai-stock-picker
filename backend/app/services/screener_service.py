@@ -97,9 +97,9 @@ class ScreenerService:
         }
 
     def _base_filter_result(self, row: dict[str, Any], options: dict[str, Any]) -> tuple[bool, str | None]:
-        if options["exclude_st"] and int(row.get("is_st") or 0):
+        if options["exclude_st"] and self._flag(row.get("is_st")):
             return False, "ST/*ST"
-        if options["exclude_paused"] and int(row.get("is_paused") or 0):
+        if options["exclude_paused"] and self._flag(row.get("is_paused")):
             return False, "停牌"
         min_market_cap = options["min_market_cap"]
         if min_market_cap and self._number(row.get("total_mv")) < min_market_cap:
@@ -295,7 +295,7 @@ class ScreenerService:
             symbol=str(row.get("symbol") or row["ts_code"].split(".")[0]),
             name=str(row.get("name") or row["ts_code"]),
             industry=row.get("industry"),
-            index_names=row.get("index_names") or [],
+            index_names=row.get("index_names") if isinstance(row.get("index_names"), list) else [],
             close=ScreenerService._optional_number(row.get("close")),
             pct_chg=ScreenerService._optional_number(row.get("pct_chg")),
             pe_ttm=ScreenerService._optional_number(row.get("pe_ttm")),
@@ -329,3 +329,7 @@ class ScreenerService:
     @staticmethod
     def _score(value: Any, default: float = 0.0) -> float:
         return coerce_score(value, default=default)
+
+    @staticmethod
+    def _flag(value: Any) -> bool:
+        return bool(int(safe_float(value, 0)))

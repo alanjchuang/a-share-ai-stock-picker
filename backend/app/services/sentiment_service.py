@@ -87,7 +87,12 @@ class SentimentService:
             self.conn.commit()
         return result
 
-    def batch_refresh_existing(self, limit: int = 200, cancel_check: Callable[[], None] | None = None) -> dict[str, int]:
+    def batch_refresh_existing(
+        self,
+        limit: int = 200,
+        cancel_check: Callable[[], None] | None = None,
+        prefer_llm: bool = True,
+    ) -> dict[str, int]:
         rows = self.conn.execute(
             """
             SELECT id, ts_code, title, content, source, publish_time
@@ -109,6 +114,45 @@ class SentimentService:
                     publish_time=row["publish_time"],
                 ),
                 persist=False,
+                prefer_llm=prefer_llm,
+            )
+            self.conn.execute(
+                "UPDATE stock_news SET sentiment_score = ?, sentiment_label = ?, keywords = ? WHERE id = ?",
+                (result.score, result.label, ",".join(result.keywords), row["id"]),
+            )
+        self.conn.commit()
+        return {"updated": len(rows)}
+
+    def refresh_stock_news(
+        self,
+        ts_code: str,
+        limit: int = 80,
+        cancel_check: Callable[[], None] | None = None,
+        prefer_llm: bool = True,
+    ) -> dict[str, int]:
+        rows = self.conn.execute(
+            """
+            SELECT id, ts_code, title, content, source, publish_time
+            FROM stock_news
+            WHERE ts_code = ?
+            ORDER BY publish_time DESC
+            LIMIT ?
+            """,
+            (ts_code, max(1, limit)),
+        ).fetchall()
+        for row in rows:
+            if cancel_check:
+                cancel_check()
+            result = self.analyze(
+                NewsAnalyzeRequest(
+                    ts_code=row["ts_code"],
+                    title=row["title"],
+                    content=row["content"],
+                    source=row["source"] or "database",
+                    publish_time=row["publish_time"],
+                ),
+                persist=False,
+                prefer_llm=prefer_llm,
             )
             self.conn.execute(
                 "UPDATE stock_news SET sentiment_score = ?, sentiment_label = ?, keywords = ? WHERE id = ?",

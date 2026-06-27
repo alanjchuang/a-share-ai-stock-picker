@@ -71,10 +71,15 @@ class StockService:
         )
 
     def detail(self, ts_code: str) -> StockDetail:
+        ts_code = ts_code.strip().upper()
+        fallback_warnings: list[str] = []
         rows = self.factor_engine.factor_rows()
-        row = next((item for item in rows if item["ts_code"] == ts_code), None)
+        row = next((item for item in rows if str(item["ts_code"]).upper() == ts_code), None)
         if not row:
-            raise ValueError("股票不存在或尚未计算因子")
+            row = self._fallback_detail_row(ts_code)
+            if not row:
+                raise ValueError("股票不存在或尚未计算因子")
+            fallback_warnings.append("该股票暂未进入因子缓存，已使用股票基础信息和最新行情/财务展示；AI评分和雷达分可能为空。")
         base = ScreenerService._to_stock_score(row)
 
         daily, data_warnings = self.repo.stock_daily_quality(ts_code, limit=120)
@@ -157,7 +162,7 @@ class StockService:
             data_warnings.append(f"当前仅有 {len(kline)} 条可信K线，部分均线和回测信号会偏弱；请在数据中心同步更多历史行情。")
         if not financial_history:
             data_warnings.append("当前个股缺少可用财务历史，请在数据中心触发财务数据同步。")
-        data_warnings.extend(news_warnings)
+        data_warnings = [*fallback_warnings, *data_warnings, *news_warnings]
         return StockDetail(
             base=base,
             kline=kline,
@@ -168,6 +173,64 @@ class StockService:
             data_source=source,
             data_warnings=data_warnings,
         )
+
+    def _fallback_detail_row(self, ts_code: str) -> dict[str, Any] | None:
+        stock = self.conn.execute(
+            """
+            SELECT s.*, GROUP_CONCAT(DISTINCT ii.name) AS index_names
+            FROM stocks s
+            LEFT JOIN index_members im ON im.ts_code = s.ts_code
+            LEFT JOIN index_info ii ON ii.index_code = im.index_code
+            WHERE s.ts_code = ?
+            GROUP BY s.ts_code
+            """,
+            (ts_code,),
+        ).fetchone()
+        if not stock:
+            return None
+
+        latest_daily = self.conn.execute(
+            "SELECT * FROM stock_daily WHERE ts_code = ? ORDER BY trade_date DESC LIMIT 1",
+            (ts_code,),
+        ).fetchone()
+        latest_fundamental = self.repo.latest_fundamental(ts_code)
+        capital_window = self.repo.capital_window(ts_code, 20)
+        recent_news = self.repo.recent_news(ts_code, 15)
+        sentiment_score = (
+            round(sum(coerce_score(item.get("sentiment_score"), default=50) for item in recent_news) / len(recent_news), 2)
+            if recent_news
+            else 50
+        )
+
+        data = dict(stock)
+        index_names = data.get("index_names")
+        data["index_names"] = [item for item in str(index_names or "").split(",") if item]
+        if latest_daily:
+            daily = dict(latest_daily)
+            data.update(
+                {
+                    "trade_date": daily.get("trade_date"),
+                    "close": daily.get("close"),
+                    "pct_chg": daily.get("pct_chg"),
+                    "turnover_rate": daily.get("turnover_rate"),
+                    "volume_ratio": daily.get("volume_ratio"),
+                }
+            )
+        data.update(latest_fundamental)
+        data.update(capital_window)
+        data.update(
+            {
+                "sentiment_score": sentiment_score,
+                "sentiment_label": self._sentiment_label(sentiment_score),
+                "sentiment_factor_score": sentiment_score,
+                "fundamental_score": 0,
+                "technical_score": 0,
+                "capital_score": 0,
+                "ai_score": 0,
+                "rating": "C",
+            }
+        )
+        return data
 
     def llm_analysis(self, ts_code: str) -> StockLlmAnalysisResponse:
         detail = self.detail(ts_code)
@@ -180,8 +243,9 @@ class StockService:
         except Exception as exc:
             return self._fallback_analysis(detail, f"LLM解析失败，已使用本地因子生成规则解析：{exc}")
 
-    @staticmethod
+    @classmethod
     def _market_row_matches(
+        cls,
         row: dict[str, Any],
         keyword: str,
         industry: str | None,
@@ -196,9 +260,9 @@ class StockService:
             return False
         if rating and rating != "全部" and str(row.get("rating") or "") != rating:
             return False
-        if not include_st and int(row.get("is_st") or 0):
+        if not include_st and cls._flag(row.get("is_st")):
             return False
-        if not include_paused and int(row.get("is_paused") or 0):
+        if not include_paused and cls._flag(row.get("is_paused")):
             return False
         return True
 
@@ -275,8 +339,8 @@ class StockService:
             volume_ratio=cls._optional_float(row.get("volume_ratio")),
             pct_chg_20=cls._optional_float(row.get("pct_chg_20")),
             pct_chg_60=cls._optional_float(row.get("pct_chg_60")),
-            is_st=bool(row.get("is_st")),
-            is_paused=bool(row.get("is_paused")),
+            is_st=cls._flag(row.get("is_st")),
+            is_paused=cls._flag(row.get("is_paused")),
         )
 
     @staticmethod
@@ -289,6 +353,10 @@ class StockService:
     @staticmethod
     def _float(value: object, default: float = 0.0) -> float:
         return safe_float(value, default)
+
+    @staticmethod
+    def _flag(value: object) -> bool:
+        return bool(int(safe_float(value, 0)))
 
     @staticmethod
     def _sentiment_label(score: float) -> str:

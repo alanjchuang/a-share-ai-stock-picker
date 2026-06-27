@@ -44,8 +44,8 @@ const PatternRadar = () => {
   const [signal, setSignal] = useState<'all' | 'bullish' | 'bearish' | 'neutral'>('all');
   const [data, setData] = useState<PatternRadarResponse | null>(null);
 
-  async function load(): Promise<void> {
-    setData(await api.getPatternRadar({ limit: 160, signal }));
+  async function load(forceRefresh = false): Promise<void> {
+    setData(await api.getPatternRadar({ limit: 160, signal }, { forceRefresh }));
   }
 
   useEffect(() => {
@@ -96,7 +96,7 @@ const PatternRadar = () => {
     <PageContainer
       title="K线形态雷达"
       extra={[
-        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(load())}>
+        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(load(true))}>
           刷新
         </Button>
       ]}

@@ -5,7 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from app.models.schemas import OneClickRecommendRequest, OneClickRecommendResponse, StockRecommendationItem
-from app.services.recommendation_jobs import get_one_click_recommendation_job, submit_one_click_recommendation_job
+from app.db.database import get_connection
+from app.services.recommendation_jobs import get_one_click_recommendation_job, list_one_click_recommendation_jobs, submit_one_click_recommendation_job
 
 
 class RecommendationJobsTest(unittest.TestCase):
@@ -51,9 +52,54 @@ class RecommendationJobsTest(unittest.TestCase):
                         break
                     time.sleep(0.05)
 
-        self.assertIsNotNone(job)
-        self.assertEqual(job["status"], "success")
-        self.assertEqual(job["result"]["recommendations"][0]["confidence"], 85.0)
+                jobs = list_one_click_recommendation_jobs(limit=5)
+
+            self.assertIsNotNone(job)
+            self.assertEqual(job["status"], "success")
+            self.assertEqual(job["result"]["recommendations"][0]["confidence"], 85.0)
+            self.assertEqual(jobs[0]["id"], job_id)
+            self.assertEqual(jobs[0]["result"]["recommendations"][0]["ts_code"], "600000.SH")
+
+    def test_stale_running_jobs_are_expired_when_listed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, "config.toml")
+            db_path = os.path.join(tmpdir, "jobs.sqlite3")
+            with open(config_path, "w", encoding="utf-8") as file:
+                file.write(f'[database]\npath = "{db_path}"\n')
+
+            with patch.dict(os.environ, {"A_STOCK_CONFIG": config_path}):
+                conn = get_connection()
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS recommendation_jobs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        job_type TEXT NOT NULL DEFAULT 'one_click_recommendation',
+                        status TEXT NOT NULL,
+                        message TEXT DEFAULT '',
+                        request_json TEXT DEFAULT '',
+                        result_json TEXT DEFAULT '',
+                        started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        finished_at TEXT
+                    )
+                    """
+                )
+                cursor = conn.execute(
+                    """
+                    INSERT INTO recommendation_jobs(job_type, status, message, started_at)
+                    VALUES ('one_click_recommendation', 'running', 'old task', datetime('now', '-31 minutes'))
+                    """
+                )
+                conn.commit()
+                job_id = int(cursor.lastrowid)
+                conn.close()
+
+                job = get_one_click_recommendation_job(job_id)
+                jobs = list_one_click_recommendation_jobs(limit=5)
+
+            self.assertEqual(job["status"], "failed")
+            self.assertIn("任务已中断", job["message"])
+            self.assertEqual(jobs[0]["status"], "failed")
+            self.assertTrue(jobs[0]["finished_at"])
 
 
 if __name__ == "__main__":

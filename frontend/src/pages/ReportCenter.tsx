@@ -17,8 +17,8 @@ const ReportCenter = () => {
     [activeId, reports]
   );
 
-  async function loadReports(): Promise<void> {
-    const data = await api.listReports(50);
+  async function loadReports(forceRefresh = false): Promise<void> {
+    const data = await api.listReports(50, { forceRefresh });
     setReports(data);
     if (!activeId && data[0]) {
       setActiveId(data[0].id);
@@ -29,7 +29,7 @@ const ReportCenter = () => {
     setGenerating(true);
     try {
       const report = await api.generateDailyReport();
-      const nextReports = await api.listReports(50);
+      const nextReports = await api.listReports(50, { forceRefresh: true });
       setReports(nextReports);
       setActiveId(report.id);
       notifySuccess('复盘报告已生成');
@@ -55,7 +55,7 @@ const ReportCenter = () => {
         <Button key="generate" type="primary" icon={<FileMarkdownOutlined />} loading={generating} onClick={() => runSafely(generateDailyReport())}>
           生成今日复盘
         </Button>,
-        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(loadReports())}>
+        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(loadReports(true))}>
           刷新
         </Button>
       ]}

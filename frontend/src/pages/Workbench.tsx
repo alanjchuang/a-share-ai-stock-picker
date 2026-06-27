@@ -1,5 +1,6 @@
 import {
   DownloadOutlined,
+  HistoryOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   RobotOutlined,
@@ -56,6 +57,7 @@ const ratingColor: Record<string, string> = {
 
 type BeginnerPreset = 'balanced' | 'value' | 'growth' | 'sentiment';
 type RecommendRisk = 'conservative' | 'balanced' | 'aggressive';
+const RUNNING_RECOMMENDATION_STALE_MS = 30 * 60 * 1000;
 
 function diagnosticsDescription(result: ScreeningResult): string {
   const diagnostics = result.diagnostics;
@@ -86,6 +88,19 @@ function workflowDescription(workflow: StockSelectionWorkflowResult): string {
   return [`builtin工具调用${workflow.tool_calls.length}个。`, warnings, stepText ? `执行链路：${stepText}` : '']
     .filter(Boolean)
     .join(' ');
+}
+
+function recommendationJobLabel(job: OneClickRecommendJob): string {
+  const time = job.finished_at || job.started_at || '';
+  const resultCount = job.result?.recommendations.length;
+  const statusText = job.status === 'success' ? `${resultCount ?? 0}只` : job.status;
+  return [time, statusText].filter(Boolean).join(' · ');
+}
+
+function isFreshRunningRecommendationJob(job: OneClickRecommendJob): boolean {
+  if (!['queued', 'running'].includes(job.status)) return false;
+  const timestamp = Date.parse((job.started_at || '').replace(' ', 'T'));
+  return Number.isFinite(timestamp) && Date.now() - timestamp < RUNNING_RECOMMENDATION_STALE_MS;
 }
 
 function normalizeRequest(values: Partial<ScreeningRequest>): ScreeningRequest {
@@ -131,6 +146,7 @@ const Workbench = () => {
   const [recommendRisk, setRecommendRisk] = useState<RecommendRisk>('balanced');
   const [recommendation, setRecommendation] = useState<OneClickRecommendResponse | null>(null);
   const [recommendationJob, setRecommendationJob] = useState<OneClickRecommendJob | null>(null);
+  const [recommendationJobs, setRecommendationJobs] = useState<OneClickRecommendJob[]>([]);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [aiParseError, setAiParseError] = useState<string | null>(null);
   const [workflowResult, setWorkflowResult] = useState<StockSelectionWorkflowResult | null>(null);
@@ -147,6 +163,7 @@ const Workbench = () => {
       const defaultWorkflow = items.find((item) => item.is_default) ?? items[0];
       setSelectedWorkflowPath(defaultWorkflow?.path);
     }));
+    runSafely(loadRecommendationJobs(true));
   }, []);
 
   useEffect(() => {
@@ -169,6 +186,15 @@ const Workbench = () => {
         value: item.index_code
       })),
     [indices]
+  );
+
+  const recommendationJobOptions = useMemo(
+    () =>
+      recommendationJobs.map((job) => ({
+        label: `#${job.id} ${recommendationJobLabel(job)}`,
+        value: job.id
+      })),
+    [recommendationJobs]
   );
 
   function beginnerRequest(preset: BeginnerPreset): ScreeningRequest {
@@ -361,6 +387,31 @@ const Workbench = () => {
     notifySuccess(`${record.name} 已加入自选股`);
   }
 
+  async function loadRecommendationJobs(restoreLatest = false): Promise<void> {
+    const jobs = await api.listOneClickRecommendJobs(20);
+    setRecommendationJobs(jobs);
+    if (!restoreLatest) return;
+    const runningJob = jobs.find(isFreshRunningRecommendationJob);
+    const latestSuccess = jobs.find((job) => job.status === 'success' && job.result);
+    const job = runningJob ?? latestSuccess;
+    if (!job) {
+      setRecommendationJob(null);
+      setRecommendation(null);
+      return;
+    }
+    setRecommendationJob(job);
+    if (job.result) {
+      setRecommendation(job.result);
+      setRecommendationError(null);
+    }
+  }
+
+  async function openRecommendationJob(jobId: number): Promise<void> {
+    setRecommendationError(null);
+    setRecommendation(null);
+    await refreshRecommendationJob(jobId, false);
+  }
+
   async function oneClickRecommend(): Promise<void> {
     setAiParseError(null);
     setRecommendationError(null);
@@ -387,19 +438,21 @@ const Workbench = () => {
       });
       notifySuccess(job.message);
       await refreshRecommendationJob(job.job_id);
+      await loadRecommendationJobs();
     } catch (error) {
       setRecommendationError(getRequestErrorMessage(error, '一键荐股执行失败，请检查系统配置。'));
       throw error;
     }
   }
 
-  async function refreshRecommendationJob(jobId: number): Promise<void> {
+  async function refreshRecommendationJob(jobId: number, showSuccess = true): Promise<void> {
     const job = await api.getOneClickRecommendJob(jobId);
     setRecommendationJob(job);
+    setRecommendationJobs((items) => [job, ...items.filter((item) => item.id !== job.id)].slice(0, 20));
     if (job.status === 'success' && job.result) {
       setRecommendation(job.result);
       setRecommendationError(null);
-      notifySuccess('一键研究推荐完成');
+      if (showSuccess) notifySuccess('一键研究推荐完成');
     } else if (job.status === 'failed') {
       setRecommendationError(job.message || '一键荐股后台任务失败。');
     }
@@ -567,6 +620,22 @@ const Workbench = () => {
                     {recommendationRunning ? '荐股中' : '一键荐股'}
                   </Button>
                 </Tooltip>
+                <Space.Compact>
+                  <Tooltip title="刷新最近的一键荐股记录">
+                    <Button icon={<HistoryOutlined />} onClick={() => runSafely(loadRecommendationJobs())}>
+                      荐股记录
+                    </Button>
+                  </Tooltip>
+                  <Select<number>
+                    value={recommendationJob?.id}
+                    onChange={(jobId) => runSafely(openRecommendationJob(jobId))}
+                    options={recommendationJobOptions}
+                    placeholder="选择历史"
+                    disabled={!recommendationJobOptions.length}
+                    style={{ width: 230 }}
+                    popupMatchSelectWidth={320}
+                  />
+                </Space.Compact>
                 <Button icon={<PlayCircleOutlined />} onClick={() => runSafely(run())}>
                   执行选股
                 </Button>
@@ -637,7 +706,7 @@ const Workbench = () => {
           />
         ) : null}
         {recommendation ? (
-          <ProCard bordered title={`一键荐股 · ${recommendation.risk_preference}`}>
+          <ProCard bordered title={`一键荐股 · ${recommendation.risk_preference}${recommendationJob ? ` · #${recommendationJob.id}` : ''}`}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Typography.Paragraph>{recommendation.market_view}</Typography.Paragraph>
               <Typography.Text type="secondary">{recommendation.strategy}</Typography.Text>

@@ -396,6 +396,9 @@ class DataHealthResponse(BaseModel):
     scheduler_enabled: bool
     daily_sync_cron: str
     factor_cache_refresh_minutes: int
+    startup_sync_enabled: bool = True
+    incremental_sync_minutes: int = 0
+    incremental_sync_lookback_days: int = 0
     latest_trade_date: str | None = None
     tables: list[DataTableStatus] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

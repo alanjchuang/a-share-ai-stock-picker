@@ -138,6 +138,120 @@ class AkshareService:
         summary["rows"] = rows
         return summary
 
+    def sync_stock_detail(
+        self,
+        ts_code: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """刷新单只股票详情依赖的全部公开数据。
+
+        详情页进入时会触发这个后台任务：实时行情/估值快照、历史K线、
+        财务指标、资金流和AKShare新闻都会更新到本地SQLite。
+        """
+        if not self.settings.akshare.enabled:
+            raise RuntimeError("AKShare数据源已在配置中禁用")
+        if cancel_check:
+            cancel_check()
+
+        symbol = self._symbol(ts_code)
+        normalized_ts_code = self._ts_code(symbol)
+        safe_start_date = start_date or self.settings.akshare.default_start_date
+        safe_end_date = end_date or self.settings.akshare.default_end_date or self._last_workday()
+        history_start_date = start_date or self._single_stock_history_start_date(
+            normalized_ts_code,
+            safe_start_date,
+            safe_end_date,
+        )
+        summary: dict[str, Any] = {
+            "mode": "akshare",
+            "task": "single_stock_detail",
+            "ts_code": normalized_ts_code,
+            "start_date": safe_start_date,
+            "end_date": safe_end_date,
+            "history_start_date": history_start_date,
+            "tables": {},
+            "warnings": [],
+        }
+
+        spot_df = self._safe_call("A股实时行情", self.ak.stock_zh_a_spot_em, summary=summary)
+        if spot_df is not None and not spot_df.empty:
+            spot_df = self._normalize_spot(spot_df)
+            spot_one = spot_df[spot_df["代码"].astype(str).str.zfill(6) == symbol]
+            if not spot_one.empty:
+                summary["tables"]["stocks"] = self._sync_spot_stocks(spot_one)
+                summary["tables"]["daily_spot"] = self._sync_spot_daily_and_basic(spot_one, safe_end_date)
+                self.conn.commit()
+            else:
+                summary["warnings"].append(f"实时行情未包含 {normalized_ts_code}")
+        if cancel_check:
+            cancel_check()
+
+        history = self._safe_call(
+            f"{symbol}历史行情",
+            self.ak.stock_zh_a_hist,
+            symbol=symbol,
+            period="daily",
+            start_date=history_start_date,
+            end_date=safe_end_date,
+            adjust=self.settings.akshare.adjust,
+            summary=summary,
+        )
+        if history is not None and not history.empty:
+            summary["tables"]["history"] = self._insert_history(symbol, history)
+            self.conn.commit()
+        else:
+            summary["warnings"].append(f"{normalized_ts_code} 历史K线为空")
+        if cancel_check:
+            cancel_check()
+
+        financial = self._safe_call(
+            f"{symbol}财务指标",
+            self.ak.stock_financial_analysis_indicator,
+            symbol=symbol,
+            start_year=safe_start_date[:4],
+            summary=summary,
+        )
+        summary["tables"]["financial_indicators"] = self._sync_single_financial(symbol, financial, safe_end_date)
+        self.conn.commit()
+        if cancel_check:
+            cancel_check()
+
+        summary["tables"]["capital_flows"] = self._sync_single_capital_flow(symbol, summary)
+        self.conn.commit()
+        if cancel_check:
+            cancel_check()
+
+        news = self._safe_call(f"{symbol}新闻", self.ak.stock_news_em, symbol=symbol, summary=summary)
+        summary["tables"]["news"] = self._insert_stock_news(symbol, news, limit=30)
+        self.conn.commit()
+        return summary
+
+    def _single_stock_history_start_date(self, ts_code: str, default_start_date: str, end_date: str) -> str:
+        """详情页刷新优先拉增量K线，缓存不足时才回退全量补齐。"""
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS count, MAX(trade_date) AS latest FROM stock_daily WHERE ts_code = ?",
+            (ts_code,),
+        ).fetchone()
+        row_count = int(row["count"] or 0) if row else 0
+        latest = str(row["latest"] or "") if row else ""
+        min_rows = max(int(self.settings.akshare.history_min_rows or 0), 120)
+        if row_count < min_rows or not latest:
+            return default_start_date
+
+        try:
+            latest_date = datetime.strptime(latest, "%Y%m%d")
+            end_dt = datetime.strptime(end_date, "%Y%m%d")
+        except ValueError:
+            return default_start_date
+
+        lookback_date = latest_date - timedelta(days=30)
+        if lookback_date > end_dt:
+            lookback_date = end_dt - timedelta(days=30)
+        default_dt = datetime.strptime(default_start_date, "%Y%m%d")
+        return max(default_dt, lookback_date).strftime("%Y%m%d")
+
     def sync_all_stock_history(
         self,
         start_date: str | None = None,
@@ -271,7 +385,7 @@ class AkshareService:
             pct_chg = abs(self._num(row["pct_chg"]))
             if ts_code == previous_ts_code and previous_close > 0 and pre_close > 0 and pct_chg < 35:
                 ratio = previous_close / pre_close
-                if ratio > 1.35 or ratio < 0.65:
+                if ratio > 1.25 or ratio < 0.8:
                     dirty.add(ts_code)
             previous_ts_code = ts_code
             previous_close = close
@@ -363,28 +477,30 @@ class AkshareService:
             pre_close = self._num(item.get("昨收"))
             change = self._num(item.get("涨跌额"))
             pct_chg = self._num(item.get("涨跌幅"))
-            self.conn.execute(
-                """
-                INSERT OR REPLACE INTO stock_daily
-                (ts_code, trade_date, open, high, low, close, pre_close, change, pct_chg, vol, amount, turnover_rate, volume_ratio)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    ts_code,
-                    trade_date,
-                    self._num(item.get("今开")),
-                    self._num(item.get("最高")),
-                    self._num(item.get("最低")),
-                    close,
-                    pre_close,
-                    change if change else close - pre_close if pre_close else 0,
-                    pct_chg,
-                    self._num(item.get("成交量")),
-                    self._num(item.get("成交额")),
-                    self._num(item.get("换手率")),
-                    self._num(item.get("量比")),
-                ),
-            )
+            if self._spot_daily_matches_history_scale(ts_code, trade_date, pre_close):
+                self.conn.execute(
+                    """
+                    INSERT OR REPLACE INTO stock_daily
+                    (ts_code, trade_date, open, high, low, close, pre_close, change, pct_chg, vol, amount, turnover_rate, volume_ratio)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        ts_code,
+                        trade_date,
+                        self._num(item.get("今开")),
+                        self._num(item.get("最高")),
+                        self._num(item.get("最低")),
+                        close,
+                        pre_close,
+                        change if change else close - pre_close if pre_close else 0,
+                        pct_chg,
+                        self._num(item.get("成交量")),
+                        self._num(item.get("成交额")),
+                        self._num(item.get("换手率")),
+                        self._num(item.get("量比")),
+                    ),
+                )
+                count += 1
             existing = self.conn.execute(
                 "SELECT * FROM fundamentals WHERE ts_code = ? AND trade_date = ?",
                 (ts_code, trade_date),
@@ -416,8 +532,43 @@ class AkshareService:
                     old.get("goodwill_ratio", 0),
                 ),
             )
-            count += 1
         return count
+
+    def _spot_daily_matches_history_scale(self, ts_code: str, trade_date: str, pre_close: float) -> bool:
+        """Avoid mixing unadjusted realtime quotes into adjusted historical K-lines."""
+
+        if not str(self.settings.akshare.adjust or "").strip():
+            return True
+        if pre_close <= 0:
+            return True
+        previous = self.conn.execute(
+            """
+            SELECT trade_date, close
+            FROM stock_daily
+            WHERE ts_code = ? AND trade_date < ?
+            ORDER BY trade_date DESC
+            LIMIT 1
+            """,
+            (ts_code, trade_date),
+        ).fetchone()
+        if not previous:
+            return True
+        if self._date_gap_days(str(previous["trade_date"] or ""), trade_date) > 10:
+            return True
+        previous_close = self._num(previous["close"])
+        if previous_close <= 0:
+            return True
+        ratio = previous_close / pre_close
+        return 0.8 <= ratio <= 1.25
+
+    @staticmethod
+    def _date_gap_days(left: str, right: str) -> int:
+        try:
+            left_date = datetime.strptime(left, "%Y%m%d")
+            right_date = datetime.strptime(right, "%Y%m%d")
+        except ValueError:
+            return 0
+        return abs((right_date - left_date).days)
 
     def _sync_history(
         self,
@@ -522,6 +673,69 @@ class AkshareService:
             ),
         )
 
+    def _sync_single_financial(self, symbol: str, fin: pd.DataFrame | None, trade_date: str) -> int:
+        if fin is None or fin.empty:
+            return 0
+        count = 0
+        sorted_fin = fin.sort_values("日期")
+        latest = sorted_fin.iloc[-1].to_dict()
+        ts_code = self._ts_code(symbol)
+        report_dates: set[str] = set()
+        for item in sorted_fin.to_dict(orient="records"):
+            report_date = self._date8(item.get("日期"))
+            if not report_date:
+                continue
+            self._upsert_financial_indicator_row(ts_code, report_date, item)
+            report_dates.add(report_date)
+            count += 1
+        if trade_date and trade_date not in report_dates:
+            self._upsert_financial_indicator_row(ts_code, trade_date, latest)
+            count += 1
+        return count
+
+    def _sync_single_capital_flow(self, symbol: str, summary: dict[str, Any]) -> int:
+        market = self._exchange(symbol).lower()
+        if market == "bj":
+            return 0
+        flow = self._safe_call(
+            f"{symbol}资金流",
+            self.ak.stock_individual_fund_flow,
+            stock=symbol,
+            market=market,
+            summary=summary,
+        )
+        if flow is None or flow.empty:
+            return 0
+        count = 0
+        ts_code = self._ts_code(symbol)
+        for item in flow.tail(80).to_dict(orient="records"):
+            trade_date = self._date8(item.get("日期"))
+            if not trade_date:
+                continue
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO capital_flows
+                (ts_code, trade_date, north_inflow, main_net_inflow, margin_balance_delta, institution_holding_ratio, top_list_score)
+                VALUES (?, ?, COALESCE((SELECT north_inflow FROM capital_flows WHERE ts_code=? AND trade_date=?), 0),
+                        ?, COALESCE((SELECT margin_balance_delta FROM capital_flows WHERE ts_code=? AND trade_date=?), 0),
+                        COALESCE((SELECT institution_holding_ratio FROM capital_flows WHERE ts_code=? AND trade_date=?), 0), ?)
+                """,
+                (
+                    ts_code,
+                    trade_date,
+                    ts_code,
+                    trade_date,
+                    round(self._num(item.get("主力净流入-净额")) / 10_000, 2),
+                    ts_code,
+                    trade_date,
+                    ts_code,
+                    trade_date,
+                    self._flow_score(item.get("主力净流入-净占比")),
+                ),
+            )
+            count += 1
+        return count
+
     def _sync_capital_flows(
         self,
         df: pd.DataFrame,
@@ -608,6 +822,48 @@ class AkshareService:
             self.conn.commit()
             self._sleep()
         return count
+
+    def _insert_stock_news(self, symbol: str, news: pd.DataFrame | None, limit: int = 20) -> int:
+        if news is None or news.empty:
+            return 0
+        ts_code = self._ts_code(symbol)
+        count = 0
+        for item in news.head(limit).to_dict(orient="records"):
+            title = str(self._pick(item, ["新闻标题", "标题", "title"], "")).strip()
+            content = str(self._pick(item, ["新闻内容", "内容", "摘要", "title"], title)).strip()
+            if not title and not content:
+                continue
+            publish_time = str(self._pick(item, ["发布时间", "时间", "datetime"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            if self._news_exists(ts_code, title[:160], publish_time):
+                continue
+            self.conn.execute(
+                """
+                INSERT INTO stock_news(ts_code, title, content, source, publish_time, sentiment_score, sentiment_label, keywords)
+                VALUES (?, ?, ?, ?, ?, 50, '中性', ?)
+                """,
+                (
+                    ts_code,
+                    title[:160],
+                    content[:2000],
+                    str(self._pick(item, ["文章来源", "来源"], "akshare-news")),
+                    publish_time,
+                    str(self._pick(item, ["关键词"], "")),
+                ),
+            )
+            count += 1
+        return count
+
+    def _news_exists(self, ts_code: str, title: str, publish_time: str) -> bool:
+        row = self.conn.execute(
+            """
+            SELECT 1
+            FROM stock_news
+            WHERE ts_code = ? AND title = ? AND publish_time = ?
+            LIMIT 1
+            """,
+            (ts_code, title, publish_time),
+        ).fetchone()
+        return row is not None
 
     def _sync_indices(
         self,

@@ -226,6 +226,11 @@ const SystemConfig = () => {
               </Form.Item>
               <ProFormText name={['scheduler', 'daily_sync_cron']} label="每日同步Cron" width="sm" />
               <ProFormDigit name={['scheduler', 'factor_cache_refresh_minutes']} label="因子缓存预热间隔分钟" min={0} width="sm" />
+              <Form.Item name={['scheduler', 'startup_sync_enabled']} label="启动后自动同步" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+              <ProFormDigit name={['scheduler', 'incremental_sync_minutes']} label="增量同步间隔分钟" min={0} width="sm" />
+              <ProFormDigit name={['scheduler', 'incremental_sync_lookback_days']} label="增量回看天数" min={0} width="sm" />
               <ProFormText name={['server', 'host']} label="服务Host" width="sm" />
               <ProFormDigit name={['server', 'port']} label="服务端口" min={1} max={65535} />
               <ProFormSelect name={['server', 'cors_origins']} label="CORS Origins" mode="tags" width="lg" />

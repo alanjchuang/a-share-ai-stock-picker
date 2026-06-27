@@ -18,6 +18,7 @@ from app.models.schemas import (
 from app.services.data_repository import DataRepository
 from app.services.factor_engine import FactorEngine
 from app.services.screener_service import ScreenerService
+from app.utils.indicators import safe_float
 
 
 class AnalysisService:
@@ -184,7 +185,7 @@ class AnalysisService:
         return [
             row
             for row in self.factor_engine.factor_rows()
-            if not int(row.get("is_st") or 0) and not int(row.get("is_paused") or 0)
+            if not self._flag(row.get("is_st")) and not self._flag(row.get("is_paused"))
         ]
 
     def _strategy(self, key: str) -> StrategyDefinition:
@@ -397,17 +398,18 @@ class AnalysisService:
 
     @staticmethod
     def _num(value: Any) -> float:
-        try:
-            return float(value or 0)
-        except (TypeError, ValueError):
-            return 0
+        return safe_float(value, 0)
 
     @staticmethod
     def _optional_float(value: Any) -> float | None:
-        try:
-            return None if value is None else round(float(value), 2)
-        except (TypeError, ValueError):
+        if value is None or value == "":
             return None
+        number = safe_float(value, default=float("nan"))
+        return None if number != number else round(number, 2)
+
+    @staticmethod
+    def _flag(value: Any) -> bool:
+        return bool(int(safe_float(value, 0)))
 
     @staticmethod
     def _period_return(closes: list[float], days: int) -> float:

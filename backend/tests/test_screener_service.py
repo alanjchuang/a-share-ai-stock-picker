@@ -40,6 +40,11 @@ class ScreenerServiceCoercionTest(unittest.TestCase):
     def test_range_checks_do_not_raise_on_textual_values(self) -> None:
         self.assertFalse(ScreenerService._in_range("高", RangeFilter(min=5, max=20)))
 
+    def test_nan_status_flags_are_treated_as_false(self) -> None:
+        self.assertFalse(ScreenerService._flag(float("nan")))
+        self.assertFalse(ScreenerService._flag(None))
+        self.assertTrue(ScreenerService._flag(1))
+
 
 if __name__ == "__main__":
     unittest.main()

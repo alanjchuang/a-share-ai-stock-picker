@@ -1,4 +1,4 @@
-import { request } from './http';
+import { clearRequestCache, request } from './http';
 import type {
   AppConfig,
   AnalysisReportOut,
@@ -33,6 +33,16 @@ import type {
   WatchlistNoteType,
   WorkflowInfo
 } from '../types';
+
+type ApiRequestOptions = { forceRefresh?: boolean };
+
+const META_CACHE_TTL_MS = 5 * 60 * 1000;
+const PAGE_CACHE_TTL_MS = 60 * 1000;
+const MARKET_CACHE_TTL_MS = 30 * 1000;
+
+function cacheOptions(ttlMs: number, options?: ApiRequestOptions): { cacheTtlMs: number; forceRefresh?: boolean } {
+  return { cacheTtlMs: ttlMs, forceRefresh: options?.forceRefresh };
+}
 
 export const defaultScreeningRequest: ScreeningRequest = {
   logic: 'and',
@@ -105,24 +115,36 @@ export const defaultScreeningRequest: ScreeningRequest = {
 
 export const api = {
   health: () => request<{ status: string }>({ url: '/health', method: 'GET' }),
-  getDataHealth: () => request<DataHealthResponse>({ url: '/system/data-health', method: 'GET' }),
-  listSyncJobs: () => request<SyncJobOut[]>({ url: '/sync/jobs', method: 'GET' }),
-  getActiveSyncJob: () => request<SyncJobOut | null>({ url: '/sync/jobs/active', method: 'GET' }),
+  getDataHealth: () => request<DataHealthResponse>({ url: '/system/data-health', method: 'GET', skipGlobalLoading: true }),
+  listSyncJobs: () => request<SyncJobOut[]>({ url: '/sync/jobs', method: 'GET', skipGlobalLoading: true }),
+  getSyncJob: (jobId: number) => request<SyncJobOut>({ url: `/sync/jobs/${jobId}`, method: 'GET', skipGlobalLoading: true }),
+  getActiveSyncJob: () => request<SyncJobOut | null>({ url: '/sync/jobs/active', method: 'GET', skipGlobalLoading: true }),
   cancelSyncJob: (jobId: number) => request<BackgroundJobResponse>({ url: `/sync/jobs/${jobId}/cancel`, method: 'POST' }),
-  listIndices: () => request<IndexMeta[]>({ url: '/meta/indices', method: 'GET' }),
-  getDecisionDashboard: (limit = 8) => request<DecisionDashboardResponse>({ url: '/analysis/dashboard', method: 'GET', params: { limit } }),
-  listBuiltInStrategies: () => request<StrategyDefinition[]>({ url: '/analysis/strategies', method: 'GET' }),
-  scanBuiltInStrategy: (strategyKey: string, params?: { limit?: number; holding_days?: number }) =>
-    request<StrategyScanResponse>({ url: `/analysis/strategies/${encodeURIComponent(strategyKey)}`, method: 'GET', params }),
-  getPatternRadar: (params?: { limit?: number; signal?: 'bullish' | 'bearish' | 'neutral' | 'all' }) =>
-    request<PatternRadarResponse>({ url: '/analysis/patterns', method: 'GET', params }),
-  listReports: (limit = 30) => request<AnalysisReportOut[]>({ url: '/reports', method: 'GET', params: { limit } }),
-  generateDailyReport: () => request<AnalysisReportOut>({ url: '/reports/daily', method: 'POST' }),
+  listIndices: (options?: ApiRequestOptions) =>
+    request<IndexMeta[]>({ url: '/meta/indices', method: 'GET', skipGlobalLoading: true, ...cacheOptions(META_CACHE_TTL_MS, options) }),
+  getDecisionDashboard: (limit = 8, options?: ApiRequestOptions) =>
+    request<DecisionDashboardResponse>({ url: '/analysis/dashboard', method: 'GET', params: { limit }, ...cacheOptions(PAGE_CACHE_TTL_MS, options) }),
+  listBuiltInStrategies: (options?: ApiRequestOptions) =>
+    request<StrategyDefinition[]>({ url: '/analysis/strategies', method: 'GET', skipGlobalLoading: true, ...cacheOptions(META_CACHE_TTL_MS, options) }),
+  scanBuiltInStrategy: (strategyKey: string, params?: { limit?: number; holding_days?: number }, options?: ApiRequestOptions) =>
+    request<StrategyScanResponse>({ url: `/analysis/strategies/${encodeURIComponent(strategyKey)}`, method: 'GET', params, ...cacheOptions(PAGE_CACHE_TTL_MS, options) }),
+  getPatternRadar: (params?: { limit?: number; signal?: 'bullish' | 'bearish' | 'neutral' | 'all' }, options?: ApiRequestOptions) =>
+    request<PatternRadarResponse>({ url: '/analysis/patterns', method: 'GET', params, ...cacheOptions(PAGE_CACHE_TTL_MS, options) }),
+  listReports: (limit = 30, options?: ApiRequestOptions) =>
+    request<AnalysisReportOut[]>({ url: '/reports', method: 'GET', params: { limit }, ...cacheOptions(PAGE_CACHE_TTL_MS, options) }),
+  generateDailyReport: async () => {
+    clearRequestCache('/reports');
+    const report = await request<AnalysisReportOut>({ url: '/reports/daily', method: 'POST' });
+    clearRequestCache('/reports');
+    return report;
+  },
   getReport: (id: number) => request<AnalysisReportOut>({ url: `/reports/${id}`, method: 'GET' }),
   runScreener: (data: ScreeningRequest) => request<ScreeningResult>({ url: '/screener/run', method: 'POST', data }),
   parseText: (text: string) => request<ScreeningRequest>({ url: '/ai/parse', method: 'POST', data: { text } }),
   oneClickRecommend: (data: { risk_preference: 'conservative' | 'balanced' | 'aggressive'; limit?: number; include_search?: boolean; focus_themes?: string[] }) =>
     request<BackgroundJobResponse>({ url: '/ai/recommendations/one-click', method: 'POST', data, skipGlobalLoading: true }),
+  listOneClickRecommendJobs: (limit = 20) =>
+    request<OneClickRecommendJob[]>({ url: '/ai/recommendations/one-click/jobs', method: 'GET', params: { limit }, skipGlobalLoading: true }),
   getOneClickRecommendJob: (jobId: number) =>
     request<OneClickRecommendJob>({ url: `/ai/recommendations/one-click/jobs/${jobId}`, method: 'GET', skipGlobalLoading: true }),
   runSelectionWorkflow: (text: string, workflowPath?: string) =>
@@ -131,7 +153,8 @@ export const api = {
       method: 'POST',
       data: { text, workflow_path: workflowPath }
     }),
-  listWorkflows: () => request<WorkflowInfo[]>({ url: '/ai/workflows', method: 'GET' }),
+  listWorkflows: (options?: ApiRequestOptions) =>
+    request<WorkflowInfo[]>({ url: '/ai/workflows', method: 'GET', skipGlobalLoading: true, ...cacheOptions(META_CACHE_TTL_MS, options) }),
   searchWeb: (data: WebSearchRequest) => request<WebSearchResponse>({ url: '/ai/search', method: 'POST', data }),
   generateMarketPrompts: (data: MarketPromptRequest) => request<MarketPromptResponse>({ url: '/ai/market-prompts', method: 'POST', data }),
   listStockMarket: (params: {
@@ -144,10 +167,17 @@ export const api = {
     page_size?: number;
     sort_by?: string;
     sort_order?: 'asc' | 'desc';
-  }) => request<StockMarketResponse>({ url: '/stocks', method: 'GET', params }),
-  getStockDetail: (tsCode: string) => request<StockDetail>({ url: `/stocks/${encodeURIComponent(tsCode)}`, method: 'GET' }),
+  }, options?: ApiRequestOptions) => request<StockMarketResponse>({ url: '/stocks', method: 'GET', params, ...cacheOptions(MARKET_CACHE_TTL_MS, options) }),
+  getStockDetail: (tsCode: string, options?: ApiRequestOptions) =>
+    request<StockDetail>({ url: `/stocks/${encodeURIComponent(tsCode)}`, method: 'GET', ...cacheOptions(PAGE_CACHE_TTL_MS, options) }),
   analyzeStock: (tsCode: string) =>
     request<StockLlmAnalysisResponse>({ url: `/stocks/${encodeURIComponent(tsCode)}/llm-analysis`, method: 'POST', skipGlobalLoading: true }),
+  refreshStockDetail: async (tsCode: string) => {
+    clearRequestCache(`/stocks/${encodeURIComponent(tsCode)}`);
+    const job = await request<BackgroundJobResponse>({ url: `/stocks/${encodeURIComponent(tsCode)}/refresh`, method: 'POST', skipGlobalLoading: true });
+    clearRequestCache(`/stocks/${encodeURIComponent(tsCode)}`);
+    return job;
+  },
   syncStockHistory: (tsCode: string) =>
     request<BackgroundJobResponse>({ url: `/stocks/${encodeURIComponent(tsCode)}/history/sync`, method: 'POST' }),
   listEtfs: (params: {
@@ -157,10 +187,15 @@ export const api = {
     page_size?: number;
     sort_by?: string;
     sort_order?: 'asc' | 'desc';
-  }) => request<EtfMarketResponse>({ url: '/etfs', method: 'GET', params }),
-  getEtfDetail: (etfCode: string) => request<EtfDetail>({ url: `/etfs/${encodeURIComponent(etfCode)}`, method: 'GET' }),
-  syncEtfs: (historyLimit = 0) =>
-    request<BackgroundJobResponse>({ url: '/etfs/sync', method: 'POST', params: { history_limit: historyLimit } }),
+  }, options?: ApiRequestOptions) => request<EtfMarketResponse>({ url: '/etfs', method: 'GET', params, ...cacheOptions(MARKET_CACHE_TTL_MS, options) }),
+  getEtfDetail: (etfCode: string, options?: ApiRequestOptions) =>
+    request<EtfDetail>({ url: `/etfs/${encodeURIComponent(etfCode)}`, method: 'GET', ...cacheOptions(PAGE_CACHE_TTL_MS, options) }),
+  syncEtfs: async (historyLimit = 0) => {
+    clearRequestCache('/etfs');
+    const job = await request<BackgroundJobResponse>({ url: '/etfs/sync', method: 'POST', params: { history_limit: historyLimit } });
+    clearRequestCache('/etfs');
+    return job;
+  },
   listStrategies: () => request<StrategyOut[]>({ url: '/strategies', method: 'GET' }),
   createStrategy: (data: { name: string; remark: string; conditions: ScreeningRequest; schedule_enabled: boolean; schedule_cron: string }) =>
     request<StrategyOut>({ url: '/strategies', method: 'POST', data }),
@@ -169,16 +204,34 @@ export const api = {
     data: { name?: string; remark?: string; conditions?: ScreeningRequest; schedule_enabled?: boolean; schedule_cron?: string }
   ) => request<StrategyOut>({ url: `/strategies/${id}`, method: 'PUT', data }),
   deleteStrategy: (id: number) => request<{ deleted: number }>({ url: `/strategies/${id}`, method: 'DELETE' }),
-  getConfig: () => request<AppConfig>({ url: '/config', method: 'GET' }),
-  updateConfig: (data: Partial<AppConfig>) => request<AppConfig>({ url: '/config', method: 'PUT', data }),
-  syncData: (provider?: AppConfig['market_data']['provider']) =>
-    request<BackgroundJobResponse>({
+  getConfig: (options?: ApiRequestOptions) =>
+    request<AppConfig>({ url: '/config', method: 'GET', skipGlobalLoading: true, ...cacheOptions(PAGE_CACHE_TTL_MS, options) }),
+  updateConfig: async (data: Partial<AppConfig>) => {
+    clearRequestCache('/config');
+    const nextConfig = await request<AppConfig>({ url: '/config', method: 'PUT', data });
+    clearRequestCache('/config');
+    return nextConfig;
+  },
+  syncData: async (provider?: AppConfig['market_data']['provider']) => {
+    clearRequestCache('/analysis');
+    clearRequestCache('/stocks');
+    clearRequestCache('/etfs');
+    const job = await request<BackgroundJobResponse>({
       url: '/sync/run',
       method: 'POST',
       data: { provider, sync_news: true, sync_fundamentals: true, sync_indices: true }
-    }),
-  syncAllStockHistory: () => request<BackgroundJobResponse>({ url: '/sync/history/all', method: 'POST' }),
-  calculateFactors: () => request<BackgroundJobResponse>({ url: '/factors/calculate', method: 'POST' }),
+    });
+    return job;
+  },
+  syncAllStockHistory: async () => {
+    clearRequestCache('/stocks');
+    return request<BackgroundJobResponse>({ url: '/sync/history/all', method: 'POST' });
+  },
+  calculateFactors: async () => {
+    clearRequestCache('/analysis');
+    clearRequestCache('/stocks');
+    return request<BackgroundJobResponse>({ url: '/factors/calculate', method: 'POST' });
+  },
   listWatchlistGroups: () => request<WatchlistGroup[]>({ url: '/watchlists/groups', method: 'GET' }),
   createWatchlistGroup: (data: { name: string; description?: string; color?: string; sort_order?: number }) =>
     request<WatchlistGroup>({ url: '/watchlists/groups', method: 'POST', data }),

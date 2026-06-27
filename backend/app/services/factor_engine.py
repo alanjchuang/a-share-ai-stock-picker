@@ -75,6 +75,36 @@ class FactorEngine:
         _write_factor_rows_cache(rows)
         return rows
 
+    def calculate_one(self, ts_code: str, cancel_check: Callable[[], None] | None = None) -> dict[str, Any]:
+        stock = next((item for item in self.repo.list_stocks() if item["ts_code"] == ts_code), None)
+        if not stock:
+            raise ValueError(f"{ts_code} 不存在，无法刷新因子")
+        if cancel_check:
+            cancel_check()
+
+        payload = self._calculate_single(stock)
+        payload["ts_code"] = stock["ts_code"]
+        payload["symbol"] = stock["symbol"]
+        payload["name"] = stock["name"]
+        payload["industry"] = stock.get("industry")
+        payload["index_names"] = [item for item in (stock.get("index_names") or "").split(",") if item]
+
+        rows = self.factor_rows()
+        if not rows:
+            rows = self.calculate_all(force=True, cancel_check=cancel_check)
+        rows = [row for row in rows if row.get("ts_code") != ts_code]
+        scored = self._score_rows([*rows, payload], load_settings().weights)
+        refreshed = next((row for row in scored if row.get("ts_code") == ts_code), None)
+        if not refreshed:
+            raise RuntimeError(f"{ts_code} 因子刷新失败")
+
+        trade_date = str(refreshed.get("trade_date") or self.repo.latest_trade_date() or "")
+        factor_payload = {key: value for key, value in refreshed.items() if key not in {"ts_code", "symbol", "name", "industry", "index_names"}}
+        self.repo.save_factor_payload(ts_code, trade_date, factor_payload)
+        self.conn.commit()
+        _write_factor_rows_cache(self.repo.read_factor_rows())
+        return refreshed
+
     def factor_rows(self, allow_blocking_refresh: bool = False) -> list[dict[str, Any]]:
         cached_rows = _read_factor_rows_cache()
         if cached_rows is not None:

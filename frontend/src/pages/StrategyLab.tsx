@@ -36,16 +36,16 @@ const StrategyLab = () => {
 
   const selectedStrategy = useMemo(() => strategies.find((item) => item.key === selectedKey), [selectedKey, strategies]);
 
-  async function loadStrategies(): Promise<void> {
-    const data = await api.listBuiltInStrategies();
+  async function loadStrategies(forceRefresh = false): Promise<void> {
+    const data = await api.listBuiltInStrategies({ forceRefresh });
     setStrategies(data);
     if (!data.some((item) => item.key === selectedKey) && data[0]) {
       setSelectedKey(data[0].key);
     }
   }
 
-  async function runScan(key = selectedKey): Promise<void> {
-    setScan(await api.scanBuiltInStrategy(key, { limit: 80, holding_days: holdingDays }));
+  async function runScan(key = selectedKey, forceRefresh = false): Promise<void> {
+    setScan(await api.scanBuiltInStrategy(key, { limit: 80, holding_days: holdingDays }, { forceRefresh }));
   }
 
   useEffect(() => {
@@ -116,7 +116,7 @@ const StrategyLab = () => {
         <Button key="run" type="primary" icon={<ExperimentOutlined />} onClick={() => runSafely(runScan())}>
           扫描
         </Button>,
-        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(loadStrategies().then(() => runScan()))}>
+        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => runSafely(loadStrategies(true).then(() => runScan(selectedKey, true)))}>
           刷新
         </Button>
       ]}
