@@ -160,6 +160,12 @@ class AkshareService:
             self.conn.commit()
             symbols = spot_df["代码"].astype(str).tolist()
 
+        dirty_symbols = self._dirty_history_symbols()
+        symbols = sorted(
+            list(dict.fromkeys([self._symbol(symbol) for symbol in symbols])),
+            key=lambda symbol: (0 if self._ts_code(symbol) in dirty_symbols else 1, self._ts_code(symbol)),
+        )
+
         total = len(symbols)
         fetched_symbols = 0
         skipped_symbols = 0
@@ -176,7 +182,7 @@ class AkshareService:
             ).fetchone()
             existing_rows = int(existing["rows_count"] or 0) if existing else 0
             latest_date = str(existing["latest_date"] or "") if existing else ""
-            if existing_rows >= safe_min_rows and latest_date >= safe_end_date:
+            if ts_code not in dirty_symbols and existing_rows >= safe_min_rows and latest_date >= safe_end_date:
                 skipped_symbols += 1
                 if progress and (index == total or index % 25 == 0):
                     progress(index, total, ts_code, inserted_rows, skipped_symbols)
@@ -220,6 +226,35 @@ class AkshareService:
             "rows": inserted_rows,
             "warnings": warnings,
         }
+
+    def _dirty_history_symbols(self) -> set[str]:
+        """找出价格口径断层的股票，优先重新拉历史K线修复。
+
+        典型脏数据表现：上一日 close 是一套口径，下一日实时快照的 pre_close
+        却指向另一套价格，例如 688981.SH 的 74.91 -> 148.76。
+        """
+        rows = self.conn.execute(
+            """
+            SELECT ts_code, trade_date, close, pre_close, pct_chg
+            FROM stock_daily
+            ORDER BY ts_code, trade_date
+            """
+        ).fetchall()
+        dirty: set[str] = set()
+        previous_ts_code = ""
+        previous_close = 0.0
+        for row in rows:
+            ts_code = str(row["ts_code"])
+            close = self._num(row["close"])
+            pre_close = self._num(row["pre_close"])
+            pct_chg = abs(self._num(row["pct_chg"]))
+            if ts_code == previous_ts_code and previous_close > 0 and pre_close > 0 and pct_chg < 35:
+                ratio = previous_close / pre_close
+                if ratio > 1.35 or ratio < 0.65:
+                    dirty.add(ts_code)
+            previous_ts_code = ts_code
+            previous_close = close
+        return dirty
 
     def _sync_spot_stocks(self, df: pd.DataFrame) -> int:
         count = 0

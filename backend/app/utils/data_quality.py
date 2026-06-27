@@ -65,6 +65,25 @@ def sanitize_daily_frame(df: pd.DataFrame) -> DailyQualityResult:
 
     # 连续前后价格都跳变且成交额量级明显偏低的点，也按污染点处理。
     previous_close = data["close"].shift(1)
+    reported_pre_close = data["pre_close"].fillna(0).astype(float) if "pre_close" in data.columns else pd.Series(0.0, index=data.index)
+    pct_chg = data["pct_chg"].fillna(0).astype(float).abs() if "pct_chg" in data.columns else pd.Series(0.0, index=data.index)
+    pre_close_ratio = previous_close / reported_pre_close.replace(0, pd.NA)
+    pre_close_ratio = pre_close_ratio.replace([float("inf"), float("-inf")], pd.NA)
+    scale_break = ((pre_close_ratio > 1.35) | (pre_close_ratio < 0.65)) & (pct_chg < 35)
+    break_indices = data.index[scale_break.fillna(False)].tolist()
+    for break_index in break_indices:
+        position = data.index.get_loc(break_index)
+        before_index = data.index[:position]
+        after_index = data.index[position:]
+        if len(before_index) == 0 or len(after_index) == 0:
+            continue
+        before_amount = float(amount.loc[before_index].replace(0, pd.NA).dropna().median() or 0)
+        after_amount = float(amount.loc[after_index].replace(0, pd.NA).dropna().median() or 0)
+        if len(after_index) <= 5 and before_amount > 0 and after_amount > before_amount * 20:
+            remove_mask.loc[before_index] = True
+        elif len(before_index) <= 5 and after_amount > 0 and before_amount > after_amount * 20:
+            remove_mask.loc[after_index] = True
+
     next_close = data["close"].shift(-1)
     jump_from_prev = (data["close"] / previous_close.replace(0, pd.NA)).abs()
     jump_to_next = (data["close"] / next_close.replace(0, pd.NA)).abs()
